@@ -11,6 +11,8 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QQuickTextDocument>
+#include "pythonsyntaxhighlighting.h"
 
 #include "documenthandler.h"
 
@@ -44,6 +46,16 @@ int main(int argc, char *argv[])
     engine.load(QUrl("qrc:/qml/texteditor.qml"));
     if (engine.rootObjects().isEmpty())
         return -1;
+
+
+    QObject *editor = engine.rootObjects().first()
+                          ->findChild<QObject*>("editor");
+
+    auto doc = editor->property("textDocument")
+                   .value<QQuickTextDocument*>();
+
+
+    new PythonSyntaxHighlighting(doc->textDocument());
 
     return app.exec();
 }

@@ -18,7 +18,7 @@ ApplicationWindow {
     width: 1024
     height: 600
     visible: true
-    title: document.fileName + " - Text Editor Example"
+    //title: document.fileName + " - Text Editor Example"
 
     Component.onCompleted: {
         x = Screen.width / 2 - width / 2
@@ -102,49 +102,22 @@ ApplicationWindow {
 
             Platform.MenuItem {
                 text: qsTr("&Copy")
-                enabled: textArea.selectedText
+                //enabled: textArea.selectedText
                 onTriggered: textArea.copy()
             }
             Platform.MenuItem {
                 text: qsTr("Cu&t")
-                enabled: textArea.selectedText
+                //enabled: textArea.selectedText
                 onTriggered: textArea.cut()
             }
             Platform.MenuItem {
                 text: qsTr("&Paste")
-                enabled: textArea.canPaste
+                //enabled: textArea.canPaste
                 onTriggered: textArea.paste()
             }
         }
 
-        Platform.Menu {
-            title: qsTr("F&ormat")
 
-            Platform.MenuItem {
-                text: qsTr("&Bold")
-                checkable: true
-                checked: document.bold
-                onTriggered: document.bold = !document.bold
-            }
-            Platform.MenuItem {
-                text: qsTr("&Italic")
-                checkable: true
-                checked: document.italic
-                onTriggered: document.italic = !document.italic
-            }
-            Platform.MenuItem {
-                text: qsTr("&Underline")
-                checkable: true
-                checked: document.underline
-                onTriggered: document.underline = !document.underline
-            }
-            Platform.MenuItem {
-                text: qsTr("&Strikeout")
-                checkable: true
-                checked: document.strikeout
-                onTriggered: document.strikeout = !document.strikeout
-            }
-        }
     }
 
     FileDialog {
@@ -159,9 +132,9 @@ ApplicationWindow {
     FileDialog {
         id: saveDialog
         fileMode: FileDialog.SaveFile
-        defaultSuffix: document.fileType
+        //defaultSuffix: document.fileType
         nameFilters: openDialog.nameFilters
-        selectedNameFilter.index: document.fileType === "txt" ? 0 : 1
+        //selectedNameFilter.index: document.fileType === "txt" ? 0 : 1
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         onAccepted: document.saveAs(selectedFile)
     }
@@ -190,7 +163,7 @@ ApplicationWindow {
         onButtonClicked: function (button, role) { if (role === MessageDialog.YesRole) Qt.quit() }
     }
 
-    header: ToolBar {
+    /*header: ToolBar {
         leftPadding: 8
 
         Flow {
@@ -242,238 +215,56 @@ ApplicationWindow {
                 }
             }
 
-            Row {
-                id: formatRow
-                ToolButton {
-                    id: boldButton
-                    text: "\uE800" // icon-bold
-                    font.family: "fontello"
-                    focusPolicy: Qt.TabFocus
-                    checkable: true
-                    checked: document.bold
-                    action: boldAction
-                }
-                ToolButton {
-                    id: italicButton
-                    text: "\uE801" // icon-italic
-                    font.family: "fontello"
-                    focusPolicy: Qt.TabFocus
-                    checkable: true
-                    checked: document.italic
-                    action: italicAction
-                }
-                ToolButton {
-                    id: underlineButton
-                    text: "\uF0CD" // icon-underline
-                    font.family: "fontello"
-                    focusPolicy: Qt.TabFocus
-                    checkable: true
-                    checked: document.underline
-                    action: underlineAction
-                }
-                ToolButton {
-                    id: strikeoutButton
-                    text: "\uF0CC"
-                    font.family: "fontello"
-                    focusPolicy: Qt.TabFocus
-                    checkable: true
-                    checked: document.strikeout
-                    onClicked: document.strikeout = !document.strikeout
-                }
-                ToolButton {
-                    id: fontFamilyToolButton
-                    text: qsTr("\uE808") // icon-font
-                    font.family: "fontello"
-                    font.bold: document.bold
-                    font.italic: document.italic
-                    font.underline: document.underline
-                    font.strikeout: document.strikeout
-                    focusPolicy: Qt.TabFocus
-                    onClicked: function () {
-                        fontDialog.selectedFont = document.font
-                        fontDialog.open()
-                    }
-                }
-                ToolButton {
-                    id: textColorButton
-                    text: "\uF1FC" // icon-brush
-                    font.family: "fontello"
-                    focusPolicy: Qt.TabFocus
-                    onClicked: function () {
-                        colorDialog.selectedColor = document.textColor
-                        colorDialog.open()
-                    }
 
-                    Rectangle {
-                        width: aFontMetrics.width + 3
-                        height: 2
-                        color: document.textColor
-                        parent: textColorButton.contentItem
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.baseline: parent.baseline
-                        anchors.baselineOffset: 6
-
-                        TextMetrics {
-                            id: aFontMetrics
-                            font: textColorButton.font
-                            text: textColorButton.text
-                        }
-                    }
-                }
-                ToolSeparator {
-                    contentItem.visible: formatRow.y === alignRow.y
-                }
-            }
-
-            Row {
-                id: alignRow
-                ToolButton {
-                    id: alignLeftButton
-                    text: "\uE803" // icon-align-left
-                    font.family: "fontello"
-                    focusPolicy: Qt.TabFocus
-                    checkable: true
-                    checked: document.alignment == Qt.AlignLeft
-                    onClicked: document.alignment = Qt.AlignLeft
-                }
-                ToolButton {
-                    id: alignCenterButton
-                    text: "\uE804" // icon-align-center
-                    font.family: "fontello"
-                    focusPolicy: Qt.TabFocus
-                    checkable: true
-                    checked: document.alignment == Qt.AlignHCenter
-                    onClicked: document.alignment = Qt.AlignHCenter
-                }
-                ToolButton {
-                    id: alignRightButton
-                    text: "\uE805" // icon-align-right
-                    font.family: "fontello"
-                    focusPolicy: Qt.TabFocus
-                    checkable: true
-                    checked: document.alignment == Qt.AlignRight
-                    onClicked: document.alignment = Qt.AlignRight
-                }
-                ToolButton {
-                    id: alignJustifyButton
-                    text: "\uE806" // icon-align-justify
-                    font.family: "fontello"
-                    focusPolicy: Qt.TabFocus
-                    checkable: true
-                    checked: document.alignment == Qt.AlignJustify
-                    onClicked: document.alignment = Qt.AlignJustify
-                }
-            }
         }
-    }
+    }*/
 
-    DocumentHandler {
-        id: document
-        document: textArea.textDocument
-        cursorPosition: textArea.cursorPosition
-        selectionStart: textArea.selectionStart
-        selectionEnd: textArea.selectionEnd
-
-        property alias family: document.font.family
-        property alias bold: document.font.bold
-        property alias italic: document.font.italic
-        property alias underline: document.font.underline
-        property alias strikeout: document.font.strikeout
-        property alias size: document.font.pointSize
-
-        Component.onCompleted: {
-            if (Qt.application.arguments.length === 2)
-                document.load("file:" + Qt.application.arguments[1]);
-            else
-                document.load("qrc:/texteditor.html")
-        }
-        onLoaded: function (text, format) {
-            textArea.textFormat = format
-            textArea.text = text
-        }
-        onError: function (message) {
-            errorDialog.text = message
-            errorDialog.open()
-        }
-    }
-
-    Flickable {
-        id: flickable
-        flickableDirection: Flickable.VerticalFlick
+    ScrollView {
         anchors.fill: parent
-
-        TextArea.flickable: TextArea {
-            id: textArea
-            textFormat: Qt.RichText
-            wrapMode: TextArea.Wrap
-            focus: true
-            selectByMouse: true
-            persistentSelection: true
-            // Different styles have different padding and background
-            // decorations, but since this editor is almost taking up the
-            // entire window, we don't need them.
-            leftPadding: 6
-            rightPadding: 6
-            topPadding: 0
-            bottomPadding: 0
-            background: null
-
-            MouseArea {
-                acceptedButtons: Qt.RightButton
+        Rectangle {
+            width: parent.width
+            height: parent.height
+            color: "white"
+            border.color: "red"
+            border.width: 2
+            TextEdit{
+                id: editor
+                objectName: "editor"
                 anchors.fill: parent
-                onClicked: contextMenu.open()
+                anchors.margins: 8
+                focus: true
+
+                wrapMode: TextEdit.NoWrap
+
+
+
+                Keys.onReturnPressed: autoIndent()
+
+                function autoIndent() {
+                    let pos = cursorPosition
+                    let t = text
+
+                    let lineStart = t.lastIndexOf("\n", pos - 1) + 1
+                    let line = t.substring(lineStart, pos)
+
+
+                    let m = line.match(/^\s*/)
+                    let indent = m ? m[0] : ""
+
+
+                    if(line.trim().endsWith(":"))
+                        indent += "    "
+
+                    let toInsert = "\n" + indent
+
+
+                    text = t.substring(0, pos) + toInsert + t.substring(pos)
+                    cursorPosition = pos + toInsert.length
+                }
+
+
             }
 
-            onLinkActivated: function (link) {
-                Qt.openUrlExternally(link)
-            }
-        }
-
-        ScrollBar.vertical: ScrollBar {}
-    }
-
-    Platform.Menu {
-        id: contextMenu
-
-        Platform.MenuItem {
-            text: qsTr("Copy")
-            enabled: textArea.selectedText
-            onTriggered: textArea.copy()
-        }
-        Platform.MenuItem {
-            text: qsTr("Cut")
-            enabled: textArea.selectedText
-            onTriggered: textArea.cut()
-        }
-        Platform.MenuItem {
-            text: qsTr("Paste")
-            enabled: textArea.canPaste
-            onTriggered: textArea.paste()
-        }
-
-        Platform.MenuSeparator {}
-
-        Platform.MenuItem {
-            text: qsTr("Font...")
-            onTriggered: function () {
-                fontDialog.selectedFont = document.font
-                fontDialog.open()
-            }
-        }
-
-        Platform.MenuItem {
-            text: qsTr("Color...")
-            onTriggered: function () {
-                colorDialog.selectedColor = document.textColor
-                colorDialog.open()
-            }
-        }
-    }
-
-    onClosing: function (close) {
-        if (document.modified) {
-            quitDialog.open()
-            close.accepted = false
         }
     }
 }
