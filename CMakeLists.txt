@@ -14,6 +14,8 @@ find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 OPTIONAL_COMP
 qt_add_executable(texteditorexample WIN32 MACOSX_BUNDLE
     documenthandler.cpp
     texteditor.cpp
+    pythonsyntaxhighlighting.cpp
+    pythonsyntaxhighlighting.h
 )
 
 qt_add_qml_module(texteditorexample
