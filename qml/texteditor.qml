@@ -9,6 +9,7 @@ import QtQuick.Dialogs
 import Qt.labs.platform as Platform
 
 import io.qt.examples.texteditor
+import ide.backend
 
 // TODO:
 // - make designer-friendly
@@ -19,6 +20,48 @@ ApplicationWindow {
     height: 600
     visible: true
     //title: document.fileName + " - Text Editor Example"
+
+
+    property bool runPending: false
+    property url runFileURL: ""
+    property url runSelectedFile: ""
+
+
+    function triggerRunAfterSave() {
+        runPending = true
+
+
+
+        saveDialog.open()
+
+        doPendingRun()
+    }
+
+
+    function doPendingRun() {
+        if(!runPending)
+            return
+
+        runPending = false
+
+
+        console.log(runFileURL, runSelectedFile)
+
+
+
+
+        backend.runInTerminal(runFileURL.toString(), runSelectedFile.tString())
+    }
+
+    DocumentHandler {
+        id: documenthandler
+    }
+
+    Backend {
+        id: backend
+        onPathChanged: console.log("Path:", path)
+        onDataChanged: console.log("Path:", path)
+    }
 
     Component.onCompleted: {
         x = Screen.width / 2 - width / 2
@@ -35,6 +78,22 @@ ApplicationWindow {
         id: saveAsAction
         shortcut: StandardKey.SaveAs
         onTriggered: saveDialog.open()
+    }
+
+    Action {
+        id: runAction
+        text: "Run"
+        shortcut: "F5"
+        onTriggered: {
+            runFileUrl: documenthandler.fileUrl
+            runSelectedFile: saveDialog.selectedFile
+            while(!t_backend.getEmittedState())
+                ;
+
+            triggerRunAfterSave()
+
+
+        }
     }
 
     Action {
@@ -124,7 +183,7 @@ ApplicationWindow {
         id: openDialog
         fileMode: FileDialog.OpenFile
         selectedNameFilter.index: 1
-        nameFilters: ["Text files (*.txt)", "HTML files (*.html *.htm)", "Markdown files (*.md *.markdown)"]
+        nameFilters: ["All files (*)"]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         onAccepted: document.load(selectedFile)
     }
@@ -132,11 +191,21 @@ ApplicationWindow {
     FileDialog {
         id: saveDialog
         fileMode: FileDialog.SaveFile
-        //defaultSuffix: document.fileType
-        nameFilters: openDialog.nameFilters
-        //selectedNameFilter.index: document.fileType === "txt" ? 0 : 1
+        defaultSuffix: "py"
+
+        nameFilters: [
+            "Python files (*.py)",
+            "Text files (*.txt)",
+            "All files (*)"
+        ]
+
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: document.saveAs(selectedFile)
+
+        onAccepted: {
+            runSelectedFile = selectedFile
+            documenthandler.saveAs(selectedFile)
+
+        }
     }
 
     FontDialog {
@@ -163,7 +232,7 @@ ApplicationWindow {
         onButtonClicked: function (button, role) { if (role === MessageDialog.YesRole) Qt.quit() }
     }
 
-    /*header: ToolBar {
+    header: ToolBar {
         leftPadding: 8
 
         Flow {
@@ -187,37 +256,26 @@ ApplicationWindow {
             Row {
                 id: editRow
                 ToolButton {
-                    id: copyButton
-                    text: "\uF0C5" // icon-docs
+                    id: runButton
+                    text: "Run"
                     font.family: "fontello"
                     focusPolicy: Qt.TabFocus
-                    enabled: textArea.selectedText
-                    action: copyAction
+                    //enabled: editor.selectedText
+                    action: runAction
                 }
                 ToolButton {
-                    id: cutButton
-                    text: "\uE802" // icon-scissors
+                    id: debugButton
+                    text: "Debug"
                     font.family: "fontello"
                     focusPolicy: Qt.TabFocus
-                    enabled: textArea.selectedText
-                    action: cutAction
+                    //enabled: editor.selectedText
                 }
-                ToolButton {
-                    id: pasteButton
-                    text: "\uF0EA" // icon-paste
-                    font.family: "fontello"
-                    focusPolicy: Qt.TabFocus
-                    enabled: textArea.canPaste
-                    action: pasteAction
-                }
-                ToolSeparator {
-                    contentItem.visible: editRow.y === formatRow.y
-                }
+
             }
 
 
         }
-    }*/
+    }
 
     ScrollView {
         anchors.fill: parent

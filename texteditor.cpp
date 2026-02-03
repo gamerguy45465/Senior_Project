@@ -15,6 +15,7 @@
 #include "pythonsyntaxhighlighting.h"
 
 #include "documenthandler.h"
+#include "backend.h"
 
 int main(int argc, char *argv[])
 {
@@ -31,6 +32,7 @@ int main(int argc, char *argv[])
         qWarning() << "Failed to load fontello.ttf";
 
     qmlRegisterType<DocumentHandler>("io.qt.examples.texteditor", 1, 0, "DocumentHandler");
+    qmlRegisterType<Backend>("ide.backend", 1, 0, "Backend");
 
     QStringList selectors;
 #ifdef QT_EXTRA_FILE_SELECTOR
@@ -56,6 +58,22 @@ int main(int argc, char *argv[])
 
 
     new PythonSyntaxHighlighting(doc->textDocument());
+
+    Backend terminal_backend;
+    DocumentHandler terminal_dh;
+
+
+    QObject::connect(&terminal_dh, &DocumentHandler::fileUrlChanged, &terminal_backend, &Backend::fileUrlChanged);
+
+
+    engine.rootContext()->setContextProperty("t_backend", &terminal_backend);
+
+
+
+
+
+
+
 
     return app.exec();
 }
