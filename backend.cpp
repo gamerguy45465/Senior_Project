@@ -67,15 +67,47 @@ void Backend::setData(QString value)
 }
 
 
-void Backend::runInTerminal(const QString& filePath, const QString& fileName) {
-    // Ensure python is in PATH or use an absolute path to python.exe
-    QString command = "python";
-    QStringList args = {
-        "-NoExit", "-Command", QString("cd /d \"%1\"; %2 \"%3\"").arg(QFileInfo(filePath).absolutePath(), command, filePath)
-    };
+void Backend::runInTerminal(const QString& filePath, const QString& fileName)
+{
+    // We prefer the saved file (fileName) if provided, otherwise fall back to filePath.
+    QString script = fileName.trimmed().isEmpty() ? filePath : fileName;
 
-    QProcess::startDetached("wt.exe", {"powershell.exe", args.join(" ")});
+    // Accept either a local path (C:\...) or a file URL (file:///C:/...).
+    if (script.startsWith("file:", Qt::CaseInsensitive)) {
+        script = QUrl(script).toLocalFile();
+    }
 
+    // Nothing to run.
+    if (script.isEmpty())
+        return;
+
+    const QFileInfo info(script);
+    const QString workDir = info.absolutePath();
+    const QString scriptQuoted = QString("\"%1\"").arg(QDir::toNativeSeparators(info.absoluteFilePath()));
+    const QString workDirQuoted = QString("\"%1\"").arg(QDir::toNativeSeparators(workDir));
+
+#if defined(Q_OS_WIN)
+    // Build a PowerShell command that:
+    // 1) cd's to the script directory
+    // 2) runs python (or py as a fallback)
+    const QString ps = QString(
+        "Set-Location -LiteralPath %1; "
+        "$py = (Get-Command python -ErrorAction SilentlyContinue); "
+        "if ($py) { python %2 } else { py %2 }"
+    ).arg(workDirQuoted, scriptQuoted);
+
+    const QString wt = QStandardPaths::findExecutable("wt.exe");
+    if (!wt.isEmpty()) {
+        // Windows Terminal
+        QProcess::startDetached(wt, {"powershell.exe", "-NoExit", "-Command", ps});
+    } else {
+        // Fallback to PowerShell console
+        QProcess::startDetached("powershell.exe", {"-NoExit", "-Command", ps});
+    }
+#else
+    // Non-Windows: run detached (no terminal). If you want a terminal, wire up gnome-terminal/xterm here.
+    QProcess::startDetached("python3", {info.absoluteFilePath()}, workDir);
+#endif
 }
 
 void Backend::fileUrlChanged()

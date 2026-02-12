@@ -82,6 +82,7 @@ public:
 public slots:
     void load(const QUrl &fileUrl);
     Q_INVOKABLE void saveAs(const QUrl &fileUrl);
+    Q_INVOKABLE void save();
 
 //Q_SIGNALS:
 signals:

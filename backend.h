@@ -7,6 +7,10 @@
 #include <QDebug>
 #include <QProcess>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QUrl>
+#include <QStandardPaths>
+#include <QProcessEnvironment>
 
 class Backend : public QObject
 {

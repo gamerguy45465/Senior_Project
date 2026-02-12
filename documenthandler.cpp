@@ -181,6 +181,16 @@ void DocumentHandler::load(const QUrl &fileUrl)
     emit fileUrlChanged();
 }
 
+
+void DocumentHandler::save()
+{
+    if (!m_fileUrl.isValid() || m_fileUrl.isEmpty()) {
+        emit error(tr("No file name specified. Use Save As."));
+        return;
+    }
+    saveAs(m_fileUrl);
+}
+
 void DocumentHandler::saveAs(const QUrl &fileUrl)
 {
     QTextDocument *doc = textDocument();

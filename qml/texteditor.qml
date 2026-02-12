@@ -30,27 +30,32 @@ ApplicationWindow {
     function triggerRunAfterSave() {
         runPending = true
 
+        // If the document already has a filename, save in-place and run.
+        if (documenthandler.fileUrl && documenthandler.fileUrl.toString() !== "") {
+            documenthandler.save()
+            doPendingRun()
+            return
+        }
 
-
+        // Otherwise prompt for a filename.
         saveDialog.open()
-
-        doPendingRun()
     }
 
 
     function doPendingRun() {
         if(!runPending)
-            return
+            return;
 
-        runPending = false
-
-
-        console.log(runFileURL, runSelectedFile)
+        runPending = false;
 
 
+        console.log(runFileURL, runSelectedFile);
 
 
-        backend.runInTerminal(runFileURL.toString(), runSelectedFile.tString())
+
+
+        backend.runInTerminal(documenthandler.fileUrl.toString(), "");
+        runSelectedFile.toString();
     }
 
     DocumentHandler {
@@ -64,6 +69,8 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        documenthandler.document = editor.textDocument
+
         x = Screen.width / 2 - width / 2
         y = Screen.height / 2 - height / 2
     }
@@ -75,6 +82,18 @@ ApplicationWindow {
     }
 
     Action {
+        id: saveAction
+        shortcut: StandardKey.Save
+        onTriggered: {
+            if (documenthandler.fileUrl && documenthandler.fileUrl.toString() !== "") {
+                documenthandler.save()
+            } else {
+                saveDialog.open()
+            }
+        }
+    }
+
+Action {
         id: saveAsAction
         shortcut: StandardKey.SaveAs
         onTriggered: saveDialog.open()
@@ -85,14 +104,7 @@ ApplicationWindow {
         text: "Run"
         shortcut: "F5"
         onTriggered: {
-            runFileUrl: documenthandler.fileUrl
-            runSelectedFile: saveDialog.selectedFile
-            while(!t_backend.getEmittedState())
-                ;
-
             triggerRunAfterSave()
-
-
         }
     }
 
@@ -105,19 +117,19 @@ ApplicationWindow {
     Action {
         id: copyAction
         shortcut: StandardKey.Copy
-        onTriggered: textArea.copy()
+        onTriggered: editor.copy()
     }
 
     Action {
         id: cutAction
         shortcut: StandardKey.Cut
-        onTriggered: textArea.cut()
+        onTriggered: editor.cut()
     }
 
     Action {
         id: pasteAction
         shortcut: StandardKey.Paste
-        onTriggered: textArea.paste()
+        onTriggered: editor.paste()
     }
 
     Action {
@@ -162,17 +174,17 @@ ApplicationWindow {
             Platform.MenuItem {
                 text: qsTr("&Copy")
                 //enabled: textArea.selectedText
-                onTriggered: textArea.copy()
+                onTriggered: editor.copy()
             }
             Platform.MenuItem {
                 text: qsTr("Cu&t")
                 //enabled: textArea.selectedText
-                onTriggered: textArea.cut()
+                onTriggered: editor.cut()
             }
             Platform.MenuItem {
                 text: qsTr("&Paste")
                 //enabled: textArea.canPaste
-                onTriggered: textArea.paste()
+                onTriggered: editor.paste()
             }
         }
 
@@ -185,7 +197,7 @@ ApplicationWindow {
         selectedNameFilter.index: 1
         nameFilters: ["All files (*)"]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: document.load(selectedFile)
+        onAccepted: documenthandler.load(selectedFile)
     }
 
     FileDialog {
@@ -202,9 +214,9 @@ ApplicationWindow {
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
 
         onAccepted: {
-            runSelectedFile = selectedFile
             documenthandler.saveAs(selectedFile)
-
+            // If a Run was waiting on a filename, run now.
+            doPendingRun()
         }
     }
 
