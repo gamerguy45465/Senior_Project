@@ -1,0 +1,87 @@
+To generate a GTK (PyGObject) GUI for an existing Python program, I need enough information to map “what the program does” into “what controls the user should operate” and how to run the program safely from a GUI.
+
+Here’s the practical checklist.
+
+## 1) The Python program itself
+- The script/module code (or repository), including any helper modules it imports from your project.
+- The *intended entry point*:
+  - Is it a CLI tool (`if __name__ == "__main__": ...`)?
+  - Is there a main function we can call (preferred)?
+  - Or is it a library-style API?
+
+## 2) How users provide inputs
+One of these (or both):
+- **CLI interface**: argparse/click/typer options, positional args, config files, environment variables.
+- **Programmatic interface**: functions/classes that accept parameters.
+
+If it’s CLI-based, I need:
+- Full list of parameters (types, defaults, required/optional)
+- Valid ranges/allowed values
+- Dependencies between options (e.g., “if `--mode=x` then `--foo` required”)
+
+## 3) What outputs the program produces
+- What the user should see:
+  - stdout/stderr logs
+  - progress information
+  - generated files (paths/patterns)
+  - return codes / success criteria
+- Whether output is:
+  - streamed (continuous logs)
+  - produced at the end
+  - structured (JSON) vs plain text
+
+This determines widgets like log pane, progress bar, results table, “Open output folder”, etc.
+
+## 4) Program behavior that affects GUI design
+- Does it run quickly or can it take minutes/hours?
+- Can it be cancelled safely?
+- Does it use threads, multiprocessing, asyncio, GPU, network?
+- Does it need elevated permissions?
+- Does it require interactive prompts (input())? (GUI needs to replace these.)
+
+For long-running work, the GUI must run the task in a worker thread/subprocess and marshal updates back to GTK safely.
+
+## 5) Error handling and validation rules
+- Common failure modes and how they’re reported (exceptions, exit codes, printed messages).
+- Input validation rules you want enforced in the GUI (e.g., file must exist, integer bounds).
+- Whether you want “prevent invalid input” vs “allow and show error”.
+
+## 6) Dependencies and runtime environment
+- Python version
+- GTK stack:
+  - GTK 3 vs GTK 4
+  - PyGObject version
+- Target OS (Linux only? cross-platform via MSYS2 on Windows? macOS?)
+- Packaging expectations:
+  - run from source
+  - Flatpak
+  - pip/venv
+  - PyInstaller, etc.
+
+Packaging impacts resource loading, file dialogs, sandbox permissions (Flatpak), etc.
+
+## 7) UX requirements (things code rarely tells you)
+These are choices I can’t reliably infer from code alone:
+- Target audience: “simple mode” vs “expert mode”
+- Desired layout: wizard, single window, tabs, advanced section
+- Persistence: remember last used settings? where stored (GSettings/INI/JSON)?
+- Theming, icons, app name, about dialog, shortcuts
+- Accessibility requirements (keyboard navigation, screen reader labels)
+
+## 8) How you want to integrate the GUI with the program
+Two main approaches—tell me which you prefer:
+1) **Import-and-call (best)**: Refactor/structure the script so core logic is in functions/classes, GUI calls them directly.
+2) **Subprocess wrapper**: GUI runs the script as a subprocess, captures stdout/stderr, passes CLI args.
+
+I can generate either, but import-and-call usually gives better progress reporting and cancellation.
+
+---
+
+### If you want the fastest start
+Send:
+1) the script (or repo),
+2) how you currently run it from the command line (example command),
+3) what inputs users typically change,
+4) what outputs they care about.
+
+With that, I can propose a GTK UI layout and generate a working GUI skeleton wired to your program.
