@@ -99,6 +99,14 @@ Action {
         onTriggered: saveDialog.open()
     }
 
+
+
+    Action {
+        id: propertiesAction
+        
+
+    }
+
     Action {
         id: runAction
         text: "Run"
@@ -162,6 +170,27 @@ Action {
                 text: qsTr("&Save As...")
                 onTriggered: saveDialog.open()
             }
+            Platform.MenuItem { /////////////////////////////////////////////////////////////
+                text: qsTr("&Properties")
+                property var propertiesWin: null
+                
+                onTriggered: {
+                    console.log(Qt.resolvedUrl("."))
+                    if (propertiesWin) { propertiesWin.raise(); propertiesWin.requestActivate(); return }
+
+                    const component = Qt.createComponent(Qt.resolvedUrl("./properties.qml"))
+                    if (component.status !== Component.Ready) {
+                        console.log(component.errorString())
+                        return
+                    }
+
+                    propertiesWin = component.createObject(null)
+                    propertiesWin.closing.connect(function() { propertiesWin = null })
+                    propertiesWin.show()
+                    
+                }
+            }
+
             Platform.MenuItem {
                 text: qsTr("&Quit")
                 onTriggered: close()
@@ -295,7 +324,7 @@ Action {
             width: parent.width
             height: parent.height
             color: "white"
-            border.color: "red"
+            //border.color: "red"
             border.width: 2
             TextEdit{
                 id: editor

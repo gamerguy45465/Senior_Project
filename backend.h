@@ -34,6 +34,7 @@ public:
 signals:
     void pathChanged();
     void dataChanged();
+    
 
 
 //public Q_SLOTS:

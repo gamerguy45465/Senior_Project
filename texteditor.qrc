@@ -3,6 +3,8 @@
         <file>images/qt-logo.png</file>
         <file>fonts/fontello.ttf</file>
         <file>qml/texteditor.qml</file>
+        <file>qml/properties.qml</file>
+        <file>qml/Sidebar.qml</file>
         <file>texteditor.html</file>
         <file>qml/+touch/texteditor.qml</file>
         <file>+touch/texteditor.html</file>

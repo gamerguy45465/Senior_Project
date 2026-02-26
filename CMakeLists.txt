@@ -28,6 +28,8 @@ qt_add_qml_module(texteditorexample
     QML_FILES
         "qml/+touch/texteditor.qml"
         "qml/texteditor.qml"
+        "qml/properties.qml"
+        "qml/Sidebar.qml"
     RESOURCES
         "texteditor.html"
         "+touch/texteditor.html"
