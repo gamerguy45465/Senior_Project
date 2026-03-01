@@ -61,3 +61,15 @@ install(TARGETS texteditorexample
     BUNDLE DESTINATION "${INSTALL_EXAMPLEDIR}"
     LIBRARY DESTINATION "${INSTALL_EXAMPLEDIR}"
 )
+
+
+
+include_directories(
+    "C:/Users/jorda/AppData/Local/Programs/Python/Python311/include/Python.h"
+)
+
+
+
+target_link_libraries(texteditor
+    "C:/Users/jorda/AppData/Local/Programs/Python/Python311/libs/python311.lib"
+)

@@ -12,6 +12,7 @@ HEADERS += \
     pythonsyntaxhighlighting.h
 
 SOURCES += \
+    python_connect.cpp \
     texteditor.cpp \
     documenthandler.cpp \
     backend.cpp \
@@ -25,3 +26,6 @@ RESOURCES += \
 
 target.path = $$[QT_INSTALL_EXAMPLES]/quickcontrols2/texteditor
 INSTALLS += target
+
+DISTFILES += \
+    agent.py
