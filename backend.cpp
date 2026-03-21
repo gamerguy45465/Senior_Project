@@ -69,44 +69,60 @@ void Backend::setData(QString value)
 
 void Backend::runInTerminal(const QString& filePath, const QString& fileName)
 {
-    // We prefer the saved file (fileName) if provided, otherwise fall back to filePath.
-    QString script = fileName.trimmed().isEmpty() ? filePath : fileName;
+    auto toLocalPath = [](QString value) -> QString {
+        value = value.trimmed();
+        if (value.isEmpty())
+            return QString();
 
-    // Accept either a local path (C:\...) or a file URL (file:///C:/...).
-    if (script.startsWith("file:", Qt::CaseInsensitive)) {
-        script = QUrl(script).toLocalFile();
+        const QUrl url(value);
+        if (url.isValid() && url.scheme().compare("file", Qt::CaseInsensitive) == 0)
+            return url.toLocalFile();
+
+        return QDir::fromNativeSeparators(value);
+    };
+
+    // Prefer filePath because QML passes documenthandler.fileUrl there.
+    QString script = toLocalPath(filePath);
+
+    // Fallback for callers that pass an absolute file path or file URL in fileName.
+    if (script.isEmpty()) {
+        const QString fallback = toLocalPath(fileName);
+        if (!fallback.isEmpty())
+            script = fallback;
     }
 
-    // Nothing to run.
-    if (script.isEmpty())
+    if (script.isEmpty()) {
+        qWarning() << "Run skipped: no script path provided.";
         return;
+    }
 
     const QFileInfo info(script);
+    if (!info.exists() || !info.isFile()) {
+        qWarning() << "Run failed: script does not exist:" << script;
+        return;
+    }
+
     const QString workDir = info.absolutePath();
-    const QString scriptQuoted = QString("\"%1\"").arg(QDir::toNativeSeparators(info.absoluteFilePath()));
-    const QString workDirQuoted = QString("\"%1\"").arg(QDir::toNativeSeparators(workDir));
+    const QString scriptNative = QDir::toNativeSeparators(info.absoluteFilePath());
+    const QString workDirNative = QDir::toNativeSeparators(workDir);
+    const QString scriptQuoted = QString("\"%1\"").arg(scriptNative);
+    const QString workDirQuoted = QString("\"%1\"").arg(workDirNative);
 
 #if defined(Q_OS_WIN)
-    // Build a PowerShell command that:
-    // 1) cd's to the script directory
-    // 2) runs python (or py as a fallback)
-    const QString ps = QString(
-        "Set-Location -LiteralPath %1; "
-        "$py = (Get-Command python -ErrorAction SilentlyContinue); "
-        "if ($py) { python %2 } else { py %2 }"
+    // Use cmd.exe directly for reliability. This avoids wt.exe parsing issues
+    // and still opens an interactive terminal window that stays open.
+    const QString cmd = QString(
+        "cd /d %1 && (python %2 || py %2)"
     ).arg(workDirQuoted, scriptQuoted);
 
-    const QString wt = QStandardPaths::findExecutable("wt.exe");
-    if (!wt.isEmpty()) {
-        // Windows Terminal
-        QProcess::startDetached(wt, {"powershell.exe", "-NoExit", "-Command", ps});
-    } else {
-        // Fallback to PowerShell console
-        QProcess::startDetached("powershell.exe", {"-NoExit", "-Command", ps});
+    if (!QProcess::startDetached("cmd.exe", {"/K", cmd})) {
+        qWarning() << "Run failed: could not start cmd.exe";
     }
 #else
     // Non-Windows: run detached (no terminal). If you want a terminal, wire up gnome-terminal/xterm here.
-    QProcess::startDetached("python3", {info.absoluteFilePath()}, workDir);
+    if (!QProcess::startDetached("python3", {info.absoluteFilePath()}, workDir)) {
+        qWarning() << "Run failed: could not start python3";
+    }
 #endif
 }
 

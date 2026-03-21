@@ -48,14 +48,8 @@ ApplicationWindow {
 
         runPending = false;
 
-
-        console.log(runFileURL, runSelectedFile);
-
-
-
-
-        backend.runInTerminal(documenthandler.fileUrl.toString(), "");
-        runSelectedFile.toString();
+        const target = documenthandler.fileUrl ? documenthandler.fileUrl.toString() : ""
+        backend.runInTerminal(target, "");
     }
 
     DocumentHandler {
