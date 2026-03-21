@@ -20,7 +20,8 @@ SOURCES += \
     pythonsyntaxhighlighting.cpp
 
 OTHER_FILES += \
-    qml/*.qml
+    qml/*.qml \
+    python/*.py
 
 RESOURCES += \
     texteditor.qrc
@@ -29,7 +30,7 @@ target.path = $$[QT_INSTALL_EXAMPLES]/quickcontrols2/texteditor
 INSTALLS += target
 
 DISTFILES += \
-    agent.py
+    python/agent.py
 
 win32 {
     # You can override this in your environment with PYTHON_HOME.

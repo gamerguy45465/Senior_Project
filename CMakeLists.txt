@@ -22,6 +22,7 @@ qt_add_executable(texteditorexample WIN32 MACOSX_BUNDLE
     backend.h
     python_connect.cpp
     python_connect.h
+    python/agent.py
 )
 
 qt_add_qml_module(texteditorexample
