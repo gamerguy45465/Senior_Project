@@ -10,6 +10,7 @@ endif()
 set(INSTALL_EXAMPLEDIR "${INSTALL_EXAMPLESDIR}/quickcontrols2/texteditor")
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 OPTIONAL_COMPONENTS Widgets)
+find_package(Python3 REQUIRED COMPONENTS Development)
 
 qt_add_executable(texteditorexample WIN32 MACOSX_BUNDLE
     documenthandler.cpp
@@ -19,6 +20,8 @@ qt_add_executable(texteditorexample WIN32 MACOSX_BUNDLE
     pythonsyntaxhighlighting.h
     backend.cpp
     backend.h
+    python_connect.cpp
+    python_connect.h
 )
 
 qt_add_qml_module(texteditorexample
@@ -42,6 +45,7 @@ target_link_libraries(texteditorexample PUBLIC
     Qt::Gui
     Qt::Quick
     Qt::QuickControls2
+    Python3::Python
 )
 
 if(TARGET Qt::Widgets)
@@ -60,16 +64,4 @@ install(TARGETS texteditorexample
     RUNTIME DESTINATION "${INSTALL_EXAMPLEDIR}"
     BUNDLE DESTINATION "${INSTALL_EXAMPLEDIR}"
     LIBRARY DESTINATION "${INSTALL_EXAMPLEDIR}"
-)
-
-
-
-include_directories(
-    "C:/Users/jorda/AppData/Local/Programs/Python/Python311/include/Python.h"
-)
-
-
-
-target_link_libraries(texteditor
-    "C:/Users/jorda/AppData/Local/Programs/Python/Python311/libs/python311.lib"
 )
