@@ -54,6 +54,14 @@ ApplicationWindow {
 
     DocumentHandler {
         id: documenthandler
+        onLoaded: function(text, format) {
+            editor.textFormat = format
+            editor.text = text
+        }
+        onError: function(message) {
+            errorDialog.text = message
+            errorDialog.open()
+        }
     }
 
     Backend {
@@ -137,19 +145,19 @@ Action {
     Action {
         id: boldAction
         shortcut: StandardKey.Bold
-        onTriggered: document.bold = !document.bold
+        onTriggered: documenthandler.bold = !documenthandler.bold
     }
 
     Action {
         id: italicAction
         shortcut: StandardKey.Italic
-        onTriggered: document.italic = !document.italic
+        onTriggered: documenthandler.italic = !documenthandler.italic
     }
 
     Action {
         id: underlineAction
         shortcut: StandardKey.Underline
-        onTriggered: document.underline = !document.underline
+        onTriggered: documenthandler.underline = !documenthandler.underline
     }
 
     Platform.MenuBar {
@@ -217,8 +225,12 @@ Action {
     FileDialog {
         id: openDialog
         fileMode: FileDialog.OpenFile
-        selectedNameFilter.index: 1
-        nameFilters: ["All files (*)"]
+        selectedNameFilter.index: 0
+        nameFilters: [
+            "Python files (*.py)",
+            "Text files (*.txt)",
+            "All files (*)"
+        ]
         currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
         onAccepted: documenthandler.load(selectedFile)
     }
@@ -245,13 +257,13 @@ Action {
 
     FontDialog {
         id: fontDialog
-        onAccepted: document.font = selectedFont
+        onAccepted: documenthandler.font = selectedFont
     }
 
     ColorDialog {
         id: colorDialog
         selectedColor: "black"
-        onAccepted: document.textColor = selectedColor
+        onAccepted: documenthandler.textColor = selectedColor
     }
 
     MessageDialog {
