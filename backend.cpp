@@ -103,20 +103,50 @@ void Backend::runInTerminal(const QString& filePath, const QString& fileName)
     }
 
     const QString workDir = info.absolutePath();
+#if defined(Q_OS_WIN)
     const QString scriptNative = QDir::toNativeSeparators(info.absoluteFilePath());
     const QString workDirNative = QDir::toNativeSeparators(workDir);
-    const QString scriptQuoted = QString("\"%1\"").arg(scriptNative);
-    const QString workDirQuoted = QString("\"%1\"").arg(workDirNative);
 
-#if defined(Q_OS_WIN)
-    // Use cmd.exe directly for reliability. This avoids wt.exe parsing issues
-    // and still opens an interactive terminal window that stays open.
-    const QString cmd = QString(
-        "cd /d %1 && (python %2 || py %2)"
-    ).arg(workDirQuoted, scriptQuoted);
+    QString pyExecutable = QStandardPaths::findExecutable("py");
+    if (pyExecutable.isEmpty())
+        pyExecutable = QStandardPaths::findExecutable("python");
 
-    if (!QProcess::startDetached("cmd.exe", {"/K", cmd})) {
-        qWarning() << "Run failed: could not start cmd.exe";
+    if (pyExecutable.isEmpty()) {
+        qWarning() << "Run failed: neither 'py' nor 'python' was found in PATH.";
+        return;
+    }
+
+    const QString pyExecutableNative = QDir::toNativeSeparators(pyExecutable);
+    auto psQuote = [](QString value) -> QString {
+        return value.replace('\'', "''");
+    };
+
+    // Build a PowerShell command and pass it as EncodedCommand to avoid
+    // quoting issues when routing through cmd.exe start.
+    const QString psCommand = QString("Set-Location -LiteralPath '%1'; & '%2' '%3'; Write-Host ''; Write-Host ('Exit code: ' + $LASTEXITCODE)")
+                                  .arg(psQuote(workDirNative),
+                                       psQuote(pyExecutableNative),
+                                       psQuote(scriptNative));
+    qInfo() << "Run launching script:" << scriptNative << "with launcher:" << pyExecutableNative;
+    const QByteArray psUtf16(reinterpret_cast<const char *>(psCommand.utf16()),
+                             psCommand.size() * static_cast<int>(sizeof(ushort)));
+    const QString encodedPsCommand = QString::fromLatin1(psUtf16.toBase64());
+
+    // Force creation of a separate terminal window (instead of reusing IDE console).
+    const QStringList launchArgs = {
+        "/C",
+        "start",
+        "Python Script",
+        "powershell.exe",
+        "-NoExit",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+        encodedPsCommand
+    };
+
+    if (!QProcess::startDetached("cmd.exe", launchArgs, workDir)) {
+        qWarning() << "Run failed: could not start terminal window.";
     }
 #else
     // Non-Windows: run detached (no terminal). If you want a terminal, wire up gnome-terminal/xterm here.
