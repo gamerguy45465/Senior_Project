@@ -1,6 +1,9 @@
 from openai import OpenAI
 import os
 from dotenv import load_dotenv
+from smolagents import ToolCallingAgent
+
+current_model = "gpt-5.2" # I will eventually make this so that it can be set. For now, it will be hard coded.
 
 
 
@@ -12,23 +15,34 @@ from dotenv import load_dotenv
 
 
 
+def build_reasoning_model(): # Used to build the client object the application will be interacting with
+    key_name = "OPENAI_API_KEY"
+    load_dotenv()
+    api_key = os.getenv(key_name)
+
+    if not api_key:
+        message = (f"Error: {key_name} is not set."
+                   f"Please ensure that you have a proper API key from OpenAI."
+                   f"For more information, please go to: "
+                   f"https://openai.com/api/")
+
+        raise ValueError(message)
+
+    client = OpenAI(api_key=api_key)
+
+    return client
 
 
 
 
 def main():
-    load_dotenv()
-    api_key = os.getenv("OPENAI_API_KEY")
-
-    print(api_key)
-
-    client = OpenAI()
+    client = build_reasoning_model()
 
 
 
 
     response = client.responses.create(
-        model="gpt-5.2",
+        model=current_model, # Set the model to the current model, which can be changed in the settings
         reasoning={"effort": "high"},
         input=[
             {
@@ -43,11 +57,6 @@ def main():
 
         ]
     )
-
-
-
-
-    #print(response.choices[0].message.contents)
 
 
 
