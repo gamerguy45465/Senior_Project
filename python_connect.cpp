@@ -1,9 +1,9 @@
 #if __has_include(<Python.h>)
 #include <Python.h>
-#elif __has_include("C:/Python314/include/Python.h")
-#include "C:/Python314/include/Python.h"
+#elif __has_include("C:/Users/Jordan Coleman/AppData/Local/Programs/Python/Python314/include/Python.h")
+#include "C:/Users/Jordan Coleman/AppData/Local/Programs/Python/Python314/include/Python.h"
 #else
-#error "Python.h not found. Expected it in the compiler include path or at C:/Python314/include."
+#error "Python.h not found. Expected it in the compiler include path or at C:/Users/Jordan Coleman/AppData/Local/Programs/Python/Python314/include."
 #endif
 
 #include <QDir>
