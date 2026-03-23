@@ -10,7 +10,9 @@ endif()
 set(INSTALL_EXAMPLEDIR "${INSTALL_EXAMPLESDIR}/quickcontrols2/texteditor")
 
 find_package(Qt6 REQUIRED COMPONENTS Core Gui Quick QuickControls2 OPTIONAL_COMPONENTS Widgets)
-find_package(Python3 REQUIRED COMPONENTS Development)
+# Force CMake discovery toward the local Python 3.14 install.
+set(Python3_ROOT_DIR "C:/Python314" CACHE PATH "Python 3.14 root directory")
+find_package(Python3 REQUIRED COMPONENTS Interpreter Development)
 
 qt_add_executable(texteditorexample WIN32 MACOSX_BUNDLE
     documenthandler.cpp
@@ -48,6 +50,32 @@ target_link_libraries(texteditorexample PUBLIC
     Qt::QuickControls2
     Python3::Python
 )
+
+target_include_directories(texteditorexample PRIVATE
+    C:/Python314/include
+    ${Python3_INCLUDE_DIRS}
+)
+
+if(WIN32)
+    set(PYTHON_RUNTIME_DLL "C:/Python314/python314.dll")
+    set(PYTHON_ABI_DLL "C:/Python314/python3.dll")
+
+    if(EXISTS "${PYTHON_RUNTIME_DLL}")
+        add_custom_command(TARGET texteditorexample POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${PYTHON_RUNTIME_DLL}"
+                "$<TARGET_FILE_DIR:texteditorexample>/python314.dll"
+        )
+    endif()
+
+    if(EXISTS "${PYTHON_ABI_DLL}")
+        add_custom_command(TARGET texteditorexample POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${PYTHON_ABI_DLL}"
+                "$<TARGET_FILE_DIR:texteditorexample>/python3.dll"
+        )
+    endif()
+endif()
 
 if(TARGET Qt::Widgets)
     target_link_libraries(texteditorexample PUBLIC
