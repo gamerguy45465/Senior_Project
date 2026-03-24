@@ -41,3 +41,79 @@ class LocateInTemplatesDirectory(Tool):
 
 
         return pngs # Return the locations
+
+
+
+
+# The following tool will be used to locate python files in a Subdirectory inside the Projects directory.
+
+#class LocatePythonFiles:
+class LocatePythonFiles(Tool):
+    name = "locate_python_files"
+    description = """
+    This tool will be used to locate the Python files that the agent will be using to build a GUI for.
+    It will receive a relative path for the location of the python file, and then it will search that path for any files that contain
+    the .py extension.
+    """
+
+    inputs = {"query": {"type": "string", "description": "Subdirectory to search in for python files"}}
+    output_type = "list"
+
+
+    def __init__(self):
+        super().__init__()
+        self.working_dir = "../Projects" # For my minimum viable project, I will only be referencing the Projects folder from here on out
+
+
+    def forward(self, query: str) -> list:
+        py_files = []
+        for root, dirs, files in os.walk(self.working_dir):
+            if(re.search(query, root) != None):
+                for file in files:
+                    if file.endswith(".py"):
+                        py_files.append(self.working_dir + "/" + query + "/" + file)
+
+
+
+        return py_files
+
+#Split each line of the python files found and store them in a python list. Also, stores each list of lines in another Python list per file, and so this will return a 2D python list
+
+#class ParsePythonFiles:
+class ParsePythonFiles(Tool):
+    name = "parse_python_files"
+    description = """
+    This tool will receive a list of python files to work with, and also a list of tokens to search for. It will iterate through each line
+    in the files given, and will search for lines that match something in the given list of tokens. If a match is found, then it will append
+    those lines to a list that will be returned by the tool.
+    
+    """
+
+
+    inputs = {"query": {"type": "list", "description": "List of relative paths of Python files"}}
+    output_type = "list"
+
+
+
+    def __init__(self):
+        super().__init__()
+
+
+
+
+    def forward(self, query: list) -> list:
+        file_data = []
+        for path in query:
+            parsed_data = []
+            file = open(path, "r")
+
+            for line in file.readlines():
+                parsed_data.append(line.rstrip('\n'))
+
+
+            file_data.append(parsed_data)
+
+
+
+        return file_data
+

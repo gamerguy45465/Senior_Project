@@ -1,4 +1,8 @@
+#if __has_include(<Python.h>)
 #include <Python.h>
+#else
+#error "Python.h not found. Ensure Python development headers are installed and available on the include path."
+#endif
 
 #include <QDir>
 #include <QString>
