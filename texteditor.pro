@@ -4,6 +4,9 @@ QT += quick quickcontrols2
 qtHaveModule(widgets): QT += widgets
 CONFIG += c++17
 
+TEXTEDITOR_SOURCE_DIR = $$replace($$PWD, \\\\, /)
+DEFINES += TEXTEDITOR_SOURCE_DIR=\\\"$$TEXTEDITOR_SOURCE_DIR\\\"
+
 cross_compile: DEFINES += QT_EXTRA_FILE_SELECTOR=\\\"touch\\\"
 
 

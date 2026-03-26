@@ -320,6 +320,25 @@ void Backend::uploadTemplateDirectory(const QString &directoryPath)
                                     .arg(QDir::toNativeSeparators(finalDestination)));
 }
 
+void Backend::uploadTemplateDirectoryInteractive()
+{
+    QString initialDirectory = resolveTemplatesDirectory();
+    if (initialDirectory.isEmpty() || !QDir(initialDirectory).exists()) {
+        initialDirectory = QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+    }
+
+    const QString selectedDirectory = QFileDialog::getExistingDirectory(
+        nullptr,
+        tr("Select Template Directory"),
+        initialDirectory,
+        QFileDialog::ShowDirsOnly | QFileDialog::DontResolveSymlinks);
+
+    if (selectedDirectory.isEmpty())
+        return;
+
+    uploadTemplateDirectory(selectedDirectory);
+}
+
 bool Backend::copyDirectoryRecursively(const QString &sourcePath,
                                        const QString &destinationPath,
                                        QString *errorMessage) const
@@ -376,32 +395,69 @@ bool Backend::copyDirectoryRecursively(const QString &sourcePath,
 
 QString Backend::resolveTemplatesDirectory() const
 {
-    const QStringList roots = {QDir::currentPath(), QCoreApplication::applicationDirPath()};
-    QString projectRootCandidate;
+    auto stripBuildConfigDirectory = [](QDir directory) -> QDir {
+        const QString directoryName = directory.dirName().toLower();
+        if (directoryName == "debug"
+            || directoryName == "release"
+            || directoryName == "relwithdebinfo"
+            || directoryName == "minsizerel") {
+            directory.cdUp();
+        }
+        return directory;
+    };
 
-    for (const QString &root : roots) {
-        QDir candidate(root);
+    auto isProjectRoot = [](const QDir &directory) -> bool {
+        return QFileInfo::exists(directory.filePath("texteditor.pro"))
+               || QFileInfo::exists(directory.filePath("CMakeLists.txt"));
+    };
+
+    auto findProjectRootFrom = [&](QDir startDirectory) -> QString {
+        QDir candidate(startDirectory);
         while (candidate.exists()) {
-            const QString templatesCandidate = candidate.filePath("Templates");
-            if (QDir(templatesCandidate).exists())
-                return QDir(templatesCandidate).absolutePath();
+            if (isProjectRoot(candidate))
+                return candidate.absolutePath();
 
-            if (projectRootCandidate.isEmpty()) {
-                const bool isProjectRoot = QFileInfo::exists(candidate.filePath("CMakeLists.txt"))
-                                           || QFileInfo::exists(candidate.filePath("texteditor.pro"));
-                if (isProjectRoot)
-                    projectRootCandidate = candidate.absolutePath();
+            const QFileInfoList childDirectories = candidate.entryInfoList(
+                QDir::Dirs | QDir::NoDotAndDotDot);
+            for (const QFileInfo &childInfo : childDirectories) {
+                QDir childDir(childInfo.absoluteFilePath());
+                if (!isProjectRoot(childDir))
+                    continue;
+
+                if (QDir(childDir.filePath("Templates")).exists())
+                    return childDir.absolutePath();
             }
 
             if (!candidate.cdUp())
                 break;
         }
+
+        return QString();
+    };
+
+    QString appRootPath;
+#ifdef TEXTEDITOR_SOURCE_DIR
+    const QString compiledRootPath = QDir::cleanPath(QString::fromUtf8(TEXTEDITOR_SOURCE_DIR));
+    if (!compiledRootPath.isEmpty() && QDir(compiledRootPath).exists()) {
+        appRootPath = QDir(compiledRootPath).absolutePath();
+    }
+#endif
+
+    if (appRootPath.isEmpty()) {
+        appRootPath = findProjectRootFrom(QDir::currentPath());
     }
 
-    if (!projectRootCandidate.isEmpty())
-        return QDir(projectRootCandidate).filePath("Templates");
+    if (appRootPath.isEmpty()) {
+        const QDir executableDirectory = stripBuildConfigDirectory(QDir(QCoreApplication::applicationDirPath()));
+        appRootPath = findProjectRootFrom(executableDirectory);
+    }
 
-    return QDir(QDir::currentPath()).filePath("Templates");
+    if (appRootPath.isEmpty()) {
+        const QDir executableDirectory = stripBuildConfigDirectory(QDir(QCoreApplication::applicationDirPath()));
+        appRootPath = executableDirectory.absolutePath();
+    }
+
+    return QDir(appRootPath).filePath("Templates");
 }
 
 QString Backend::nextAvailableDirectoryPath(const QString &directoryPath) const

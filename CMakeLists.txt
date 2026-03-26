@@ -49,6 +49,10 @@ target_link_libraries(texteditorexample PUBLIC
     Python3::Python
 )
 
+target_compile_definitions(texteditorexample PRIVATE
+    TEXTEDITOR_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"
+)
+
 target_include_directories(texteditorexample PRIVATE
     ${Python3_INCLUDE_DIRS}
 )

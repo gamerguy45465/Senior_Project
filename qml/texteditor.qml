@@ -126,7 +126,7 @@ Action {
     Action {
         id: uploadTemplateAction
         text: "Upload Template"
-        onTriggered: uploadTemplateDialog.open()
+        onTriggered: backend.uploadTemplateDirectoryInteractive()
     }
 
     Action {
@@ -264,13 +264,6 @@ Action {
             // If a Run was waiting on a filename, run now.
             doPendingRun()
         }
-    }
-
-    FolderDialog {
-        id: uploadTemplateDialog
-        title: qsTr("Select a template directory")
-        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
-        onAccepted: backend.uploadTemplateDirectory(selectedFolder.toString())
     }
 
     FontDialog {
