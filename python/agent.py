@@ -1,9 +1,57 @@
 from openai import OpenAI
+import json
 import os
+import sys
 from dotenv import load_dotenv
 from smolagents import ToolCallingAgent
 
-current_model = "gpt-5.2" # I will eventually make this so that it can be set. For now, it will be hard coded.
+DEFAULT_MODEL = "gpt-5.2"
+
+
+def _settings_roots():
+    roots = []
+    if os.name == "nt":
+        appdata = os.getenv("LOCALAPPDATA") or os.getenv("APPDATA")
+        if appdata:
+            roots.append(os.path.join(appdata, "QtProject", "Text Editor"))
+    elif sys.platform == "darwin":
+        home = os.path.expanduser("~")
+        roots.append(os.path.join(home, "Library", "Application Support", "QtProject", "Text Editor"))
+        roots.append(os.path.join(home, "Library", "Preferences", "QtProject", "Text Editor"))
+    else:
+        xdg_config = os.getenv("XDG_CONFIG_HOME")
+        if xdg_config:
+            roots.append(os.path.join(xdg_config, "QtProject", "Text Editor"))
+        roots.append(os.path.join(os.path.expanduser("~"), ".config", "QtProject", "Text Editor"))
+
+    # Fallback for local development so settings still work when no config root exists.
+    roots.append(os.path.dirname(os.path.abspath(__file__)))
+    return roots
+
+
+def load_selected_model(default_model=DEFAULT_MODEL):
+    env_model = os.getenv("TEXTEDITOR_AI_MODEL", "").strip()
+    if env_model:
+        return env_model
+
+    for root in _settings_roots():
+        settings_path = os.path.join(root, "ai_settings.json")
+        try:
+            with open(settings_path, "r", encoding="utf-8") as settings_file:
+                payload = json.load(settings_file)
+        except FileNotFoundError:
+            continue
+        except (OSError, json.JSONDecodeError):
+            continue
+
+        selected_model = str(payload.get("model", "")).strip()
+        if selected_model:
+            return selected_model
+
+    return default_model
+
+
+current_model = load_selected_model()
 
 
 

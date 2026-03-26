@@ -1,5 +1,8 @@
 #include "backend.h"
 
+#include <QFile>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QStringList>
 #include <QTextStream>
 
@@ -9,6 +12,7 @@ Backend::Backend(QObject *parent)
     m_path = QCoreApplication::applicationDirPath();
     m_path.append("/file.py");
     emited_state = false;
+    m_aiModel = loadAiSettingsFromDisk();
 
 
 }
@@ -67,6 +71,103 @@ void Backend::setData(QString value)
     stream.flush();
     file.close();
 
+}
+
+QString Backend::aiModel() const
+{
+    return m_aiModel;
+}
+
+void Backend::setAiModel(const QString &value)
+{
+    const QString normalized = normalizeAiModel(value);
+    const bool changed = (normalized != m_aiModel);
+
+    m_aiModel = normalized;
+    if (!saveAiSettingsToDisk(m_aiModel)) {
+        qWarning() << "Failed to save AI settings file:" << aiSettingsFilePath();
+    }
+
+    if (changed) {
+        emit aiModelChanged();
+    }
+}
+
+QString Backend::defaultAiModel() const
+{
+    return QStringLiteral("gpt-5.2");
+}
+
+QString Backend::normalizeAiModel(const QString &value) const
+{
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty()) {
+        return defaultAiModel();
+    }
+
+    return trimmed;
+}
+
+QString Backend::aiSettingsFilePath() const
+{
+    QString basePath = QStandardPaths::writableLocation(QStandardPaths::AppConfigLocation);
+    if (basePath.isEmpty()) {
+        basePath = QDir::home().filePath(".config/Text Editor");
+    }
+
+    return QDir(basePath).filePath("ai_settings.json");
+}
+
+bool Backend::saveAiSettingsToDisk(const QString &modelValue) const
+{
+    const QString settingsPath = aiSettingsFilePath();
+    const QFileInfo info(settingsPath);
+    QDir dir = info.dir();
+    if (!dir.exists() && !dir.mkpath(".")) {
+        return false;
+    }
+
+    QFile file(settingsPath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        return false;
+    }
+
+    QJsonObject root;
+    root.insert("model", modelValue);
+
+    const QJsonDocument doc(root);
+    const qint64 bytesWritten = file.write(doc.toJson(QJsonDocument::Indented));
+    const bool flushed = file.flush();
+    file.close();
+
+    return bytesWritten >= 0 && flushed;
+}
+
+QString Backend::loadAiSettingsFromDisk() const
+{
+    const QString settingsPath = aiSettingsFilePath();
+    QFile file(settingsPath);
+    if (!file.exists()) {
+        return defaultAiModel();
+    }
+
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        qWarning() << "Unable to read AI settings file:" << settingsPath;
+        return defaultAiModel();
+    }
+
+    const QByteArray raw = file.readAll();
+    file.close();
+
+    QJsonParseError error{};
+    const QJsonDocument doc = QJsonDocument::fromJson(raw, &error);
+    if (error.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "AI settings file contains invalid JSON:" << settingsPath;
+        return defaultAiModel();
+    }
+
+    const QString modelValue = doc.object().value("model").toString();
+    return normalizeAiModel(modelValue);
 }
 
 
