@@ -68,6 +68,11 @@ ApplicationWindow {
         id: backend
         onPathChanged: console.log("Path:", path)
         onDataChanged: console.log("Path:", path)
+        onTemplateUploadFinished: function(success, message) {
+            templateUploadStatusDialog.title = success ? qsTr("Upload Complete") : qsTr("Upload Failed")
+            templateUploadStatusDialog.text = message
+            templateUploadStatusDialog.open()
+        }
     }
 
     Component.onCompleted: {
@@ -116,6 +121,12 @@ Action {
         onTriggered: {
             triggerRunAfterSave()
         }
+    }
+
+    Action {
+        id: uploadTemplateAction
+        text: "Upload Template"
+        onTriggered: uploadTemplateDialog.open()
     }
 
     Action {
@@ -255,6 +266,13 @@ Action {
         }
     }
 
+    FolderDialog {
+        id: uploadTemplateDialog
+        title: qsTr("Select a template directory")
+        currentFolder: StandardPaths.writableLocation(StandardPaths.DocumentsLocation)
+        onAccepted: backend.uploadTemplateDirectory(selectedFolder.toString())
+    }
+
     FontDialog {
         id: fontDialog
         onAccepted: documenthandler.font = selectedFont
@@ -269,6 +287,12 @@ Action {
     MessageDialog {
         title: qsTr("Error")
         id: errorDialog
+    }
+
+    MessageDialog {
+        id: templateUploadStatusDialog
+        title: qsTr("Upload Template")
+        text: ""
     }
 
     MessageDialog {
@@ -316,6 +340,13 @@ Action {
                     font.family: "fontello"
                     focusPolicy: Qt.TabFocus
                     //enabled: editor.selectedText
+                }
+                ToolButton {
+                    id: uploadTemplateButton
+                    text: "Upload Template"
+                    font.family: "fontello"
+                    focusPolicy: Qt.TabFocus
+                    action: uploadTemplateAction
                 }
 
             }

@@ -1,13 +1,35 @@
-from pydantic.v1 import root_validator
-from smolagents import Tool
-import numpy as np
-import pandas as pd
-import os
-import re
+import subprocess
+import sys
+
+try:
+    from smolagents import Tool
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import os
+    import re
+    import cv2
+
+except ImportError:
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "pandas"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "smolagents"])
+    subprocess.check_call([sys.executable, "-m", "pip", "install", "matplotlib"])
+    from smolagents import Tool
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    import os
+    import re
+    import cv2
+
+
 
 
 
 #The following tool will only be used to locate png files in a directory. This project will only support pngs for given templates.
+#class LocateInTemplatesDirectory:
 class LocateInTemplatesDirectory(Tool):
     name = "locate_in_templates_directory"
     description = """
@@ -21,9 +43,8 @@ class LocateInTemplatesDirectory(Tool):
 
 
 
-    def __init__(self, folder_to_search):
+    def __init__(self):
         super().__init__()
-        self.sub_dir = folder_to_search # The passed Directory
         self.working_dir = "../Templates" # Relative Location of the Templates folder in the project Directory
 
 
@@ -31,16 +52,82 @@ class LocateInTemplatesDirectory(Tool):
     def forward(self, query: str) -> list:
         pngs = [] # List to return
         for root, dirs, files in os.walk(self.working_dir): # Loop through the entire Templates Directory, including all of its subdirectories and files contained in the subdirectories
-            if(re.search(self.sub_dir, root) != None): # Only work in the directory specified by the application
+            if(re.search(query, root) != None): # Only work in the directory specified by the application
                 for file in files:
                     if file.endswith(".png"): # Only append files that end with .png
-                        pngs.append(self.working_dir + "/" + self.sub_dir + "/" + file) # Use the full relative path of the file
+                        pngs.append(self.working_dir + "/" + query + "/" + file) # Use the full relative path of the file
 
 
 
 
 
         return pngs # Return the locations
+
+
+
+#class ReadPNGs:
+class ReadPNGs(Tool):
+    name = "read_pngs"
+
+    description = "Default"
+
+    inputs = {"query": {"type": "list", "description": "A list of png files locations"}}
+    output_type = "list"
+
+    def __init__(self):
+        super().__init__()
+
+
+    def forward(self, query: list) -> list:
+        processed_images = []
+        for image in query:
+            img = cv2.imread(image)
+            edges = cv2.Canny(img, 100, 200)
+
+            blur = cv2.GaussianBlur(img, (5, 5), 0)
+
+            img_processing = [img, edges, blur]
+
+            processed_images.append(img_processing)
+
+
+        return processed_images
+
+
+
+'''locate_in_directory = LocateInTemplatesDirectory()
+
+
+png_list = locate_in_directory.forward("Google Material Design Email App")
+
+
+
+reader = ReadPNGs()
+
+processed_images = reader.forward(png_list)
+
+
+for i in range(len(processed_images)):
+    for image in processed_images[i]:
+        plt.figure()
+        plt.imshow(image)
+        plt.axis('off')
+        plt.show()
+        plt.close()'''
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
@@ -116,4 +203,9 @@ class ParsePythonFiles(Tool):
 
 
         return file_data
+
+
+
+
+
 

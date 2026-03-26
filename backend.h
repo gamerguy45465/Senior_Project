@@ -31,9 +31,11 @@ public:
     void setData(QString value);
 
     Q_INVOKABLE void runInTerminal(const QString &filePath, const QString &fileName);
+    Q_INVOKABLE void uploadTemplateDirectory(const QString &directoryPath);
 signals:
     void pathChanged();
     void dataChanged();
+    void templateUploadFinished(bool success, const QString &message);
     
 
 
@@ -47,6 +49,10 @@ public slots:
 
 
 private:
+    bool copyDirectoryRecursively(const QString &sourcePath, const QString &destinationPath, QString *errorMessage) const;
+    QString resolveTemplatesDirectory() const;
+    QString nextAvailableDirectoryPath(const QString &directoryPath) const;
+
     QString m_path;
     bool emited_state;
 };
