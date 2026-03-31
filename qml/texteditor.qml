@@ -23,17 +23,34 @@ ApplicationWindow {
 
 
     property bool runPending: false
+    property bool debugPending: false
     property url runFileURL: ""
     property url runSelectedFile: ""
 
 
     function triggerRunAfterSave() {
         runPending = true
+        debugPending = false
 
         // If the document already has a filename, save in-place and run.
         if (documenthandler.fileUrl && documenthandler.fileUrl.toString() !== "") {
             documenthandler.save()
             doPendingRun()
+            return
+        }
+
+        // Otherwise prompt for a filename.
+        saveDialog.open()
+    }
+
+    function triggerDebugAfterSave() {
+        debugPending = true
+        runPending = false
+
+        // If the document already has a filename, save in-place and debug.
+        if (documenthandler.fileUrl && documenthandler.fileUrl.toString() !== "") {
+            documenthandler.save()
+            doPendingDebug()
             return
         }
 
@@ -50,6 +67,16 @@ ApplicationWindow {
 
         const target = documenthandler.fileUrl ? documenthandler.fileUrl.toString() : ""
         backend.runInTerminal(target, "");
+    }
+
+    function doPendingDebug() {
+        if (!debugPending)
+            return;
+
+        debugPending = false;
+
+        const target = documenthandler.fileUrl ? documenthandler.fileUrl.toString() : ""
+        backend.debugInTerminal(target, "");
     }
 
     DocumentHandler {
@@ -120,6 +147,15 @@ Action {
         shortcut: "F5"
         onTriggered: {
             triggerRunAfterSave()
+        }
+    }
+
+    Action {
+        id: debugAction
+        text: "Debug"
+        shortcut: "F6"
+        onTriggered: {
+            triggerDebugAfterSave()
         }
     }
 
@@ -261,8 +297,9 @@ Action {
 
         onAccepted: {
             documenthandler.saveAs(selectedFile)
-            // If a Run was waiting on a filename, run now.
+            // If Run/Debug was waiting on a filename, execute now.
             doPendingRun()
+            doPendingDebug()
         }
     }
 
@@ -333,6 +370,7 @@ Action {
                     font.family: "fontello"
                     focusPolicy: Qt.TabFocus
                     //enabled: editor.selectedText
+                    action: debugAction
                 }
                 ToolButton {
                     id: uploadTemplateButton

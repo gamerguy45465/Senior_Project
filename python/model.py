@@ -64,7 +64,7 @@ class LocateInTemplatesDirectory(Tool):
         return pngs # Return the locations
 
 
-
+#Where the image Processing takes place
 #class ReadPNGs:
 class ReadPNGs(Tool):
     name = "read_pngs"
