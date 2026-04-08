@@ -206,6 +206,33 @@ class ParsePythonFiles(Tool):
 
 
 
+#class ProcessParsedData:
+class ProcessParsedData(Tool):
+    name = "process_parsed_data"
+    description = """
+        This tool will receive a 2D python list where the rows represent the lists of parsed data collected by the ParsePythonFiles tool.
+        The columns represent the parsed data that were in the python files. The job of this tool is to search for a line in the parsed data
+        that begins with @. When the tool finds a line that starts with @, it will append the index of that line to a separate list that will
+        contain all of the indices to lines starting with @. The tool will then return that list.
+
+        """
+
+    inputs = {"query": {"type": "list", "description": "2D list of parsed data"}}
+    output_type = "list"
+
+
+
+
+    def __init__(self):
+        super().__init__()
+
+
+    def forward(self, query: list) -> list:
+        for
+
+
+
+
 
 
 

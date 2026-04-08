@@ -36,6 +36,83 @@ QString resolveScriptPath(const QString &filePath, const QString &fileName)
     return scriptPath;
 }
 
+QString findScriptFromStartDirectory(const QString &startPath,
+                                     const QString &relativeScriptPath,
+                                     int maxParentLevels = 8)
+{
+    if (startPath.trimmed().isEmpty())
+        return QString();
+
+    QDir directory(QDir::cleanPath(startPath));
+    if (!directory.exists())
+        return QString();
+
+    for (int level = 0; level <= maxParentLevels; ++level) {
+        const QFileInfo directCandidate(QDir(directory.absolutePath()).filePath(relativeScriptPath));
+        if (directCandidate.exists() && directCandidate.isFile()) {
+            return directCandidate.absoluteFilePath();
+        }
+
+        // Also check one directory level below each ancestor. This handles
+        // common IDE layouts like .../Desktop/build-*/... with source in
+        // .../Desktop/texteditor/.
+        const QFileInfoList childDirectories = directory.entryInfoList(
+            QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QFileInfo &childInfo : childDirectories) {
+            const QFileInfo childCandidate(QDir(childInfo.absoluteFilePath()).filePath(relativeScriptPath));
+            if (childCandidate.exists() && childCandidate.isFile()) {
+                return childCandidate.absoluteFilePath();
+            }
+        }
+
+        if (!directory.cdUp())
+            break;
+    }
+
+    return QString();
+}
+
+QString findScriptInDirectoryList(const QStringList &directories, const QString &relativeScriptPath)
+{
+    for (const QString &directoryPath : directories) {
+        const QString candidate = findScriptFromStartDirectory(directoryPath, relativeScriptPath);
+        if (!candidate.isEmpty())
+            return candidate;
+    }
+
+    return QString();
+}
+
+QString resolveProjectScriptPath(const QString &relativeScriptPath)
+{
+    QStringList searchDirectories;
+
+    auto appendDirectoryAndParents = [&searchDirectories](const QString &startPath) {
+        if (startPath.trimmed().isEmpty())
+            return;
+
+        QDir directory(QDir::cleanPath(startPath));
+        if (!directory.exists())
+            return;
+
+        searchDirectories << directory.absolutePath();
+        for (int level = 0; level < 6; ++level) {
+            if (!directory.cdUp())
+                break;
+            searchDirectories << directory.absolutePath();
+        }
+    };
+
+#ifdef TEXTEDITOR_SOURCE_DIR
+    appendDirectoryAndParents(QString::fromUtf8(TEXTEDITOR_SOURCE_DIR));
+#endif
+    appendDirectoryAndParents(QCoreApplication::applicationDirPath());
+    appendDirectoryAndParents(QDir::currentPath());
+    searchDirectories.removeDuplicates();
+
+    return findScriptInDirectoryList(searchDirectories, relativeScriptPath);
+}
+
 void launchPythonScript(const QString &scriptPath, bool debugMode)
 {
     const QString modeLabel = debugMode ? "Debug" : "Run";
@@ -51,11 +128,18 @@ void launchPythonScript(const QString &scriptPath, bool debugMode)
     const QString workDirNative = QDir::toNativeSeparators(workDir);
 
     QString pyExecutable = QStandardPaths::findExecutable("py");
-    if (pyExecutable.isEmpty())
+    QStringList interpreterArgs;
+    if (!pyExecutable.isEmpty()) {
+        // Force Python 3 when using the Windows launcher.
+        interpreterArgs << "-3";
+    } else {
         pyExecutable = QStandardPaths::findExecutable("python");
+    }
+    if (pyExecutable.isEmpty())
+        pyExecutable = QStandardPaths::findExecutable("python3");
 
     if (pyExecutable.isEmpty()) {
-        qWarning() << modeLabel << "failed: neither 'py' nor 'python' was found in PATH.";
+        qWarning() << modeLabel << "failed: no Python launcher/interpreter was found in PATH.";
         return;
     }
 
@@ -64,16 +148,29 @@ void launchPythonScript(const QString &scriptPath, bool debugMode)
         return value.replace('\'', "''");
     };
 
-    const QString pythonInvocation = debugMode
-        ? QString("& '%1' -m pdb '%2'")
-              .arg(psQuote(pyExecutableNative), psQuote(scriptNative))
-        : QString("& '%1' '%2'")
-              .arg(psQuote(pyExecutableNative), psQuote(scriptNative));
+    QStringList scriptArgs = interpreterArgs;
+    if (debugMode) {
+        scriptArgs << "-m" << "pdb";
+    }
+    scriptArgs << scriptNative;
+
+    QStringList quotedScriptArgs;
+    quotedScriptArgs.reserve(scriptArgs.size());
+    for (const QString &arg : scriptArgs) {
+        quotedScriptArgs << QString("'%1'").arg(psQuote(arg));
+    }
+
+    const QString pythonInvocation = QString("& '%1' %2")
+                                         .arg(psQuote(pyExecutableNative),
+                                              quotedScriptArgs.join(' '));
 
     // Build a PowerShell command and pass it as EncodedCommand to avoid
     // quoting issues when routing through cmd.exe start.
-    const QString psCommand = QString("Set-Location -LiteralPath '%1'; %2; Write-Host ''; Write-Host ('Exit code: ' + $LASTEXITCODE)")
-                                  .arg(psQuote(workDirNative), pythonInvocation);
+    const QString psCommand = QString("Remove-Item Env:PYTHONHOME -ErrorAction SilentlyContinue; "
+                                      "Remove-Item Env:PYTHONPATH -ErrorAction SilentlyContinue; "
+                                      "Set-Location -LiteralPath '%1'; %2; Write-Host ''; Write-Host ('Exit code: ' + $LASTEXITCODE)")
+                                  .arg(psQuote(workDirNative),
+                                       pythonInvocation);
     qInfo() << modeLabel << "launching script:" << scriptNative << "with launcher:" << pyExecutableNative;
 
     const QByteArray psUtf16(reinterpret_cast<const char *>(psCommand.utf16()),
@@ -296,6 +393,17 @@ void Backend::debugInTerminal(const QString &filePath, const QString &fileName)
     }
 
     launchPythonScript(scriptPath, true);
+}
+
+void Backend::runAiGenerate()
+{
+    const QString agentScriptPath = resolveProjectScriptPath(QStringLiteral("python/agent.py"));
+    if (agentScriptPath.isEmpty()) {
+        qWarning() << "AI Generate failed: unable to locate python/agent.py.";
+        return;
+    }
+
+    launchPythonScript(agentScriptPath, false);
 }
 
 void Backend::uploadTemplateDirectory(const QString &directoryPath)

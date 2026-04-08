@@ -160,6 +160,12 @@ Action {
     }
 
     Action {
+        id: aiGenerateAction
+        text: "AI Generate"
+        onTriggered: backend.runAiGenerate()
+    }
+
+    Action {
         id: uploadTemplateAction
         text: "Upload Template"
         onTriggered: backend.uploadTemplateDirectoryInteractive()
@@ -371,6 +377,13 @@ Action {
                     focusPolicy: Qt.TabFocus
                     //enabled: editor.selectedText
                     action: debugAction
+                }
+                ToolButton {
+                    id: aiGenerateButton
+                    text: "AI Generate"
+                    font.family: "fontello"
+                    focusPolicy: Qt.TabFocus
+                    action: aiGenerateAction
                 }
                 ToolButton {
                     id: uploadTemplateButton
