@@ -395,14 +395,27 @@ void Backend::debugInTerminal(const QString &filePath, const QString &fileName)
     launchPythonScript(scriptPath, true);
 }
 
-void Backend::runAiGenerate()
+void Backend::runAiGenerate(const QString &filePath, const QString &fileName)
 {
+    const QString sourceFilePath = resolveScriptPath(filePath, fileName);
+    if (sourceFilePath.isEmpty()) {
+        qWarning() << "AI Generate skipped: no active file path provided.";
+        return;
+    }
+
+    const QFileInfo sourceInfo(sourceFilePath);
+    if (!sourceInfo.exists() || !sourceInfo.isFile()) {
+        qWarning() << "AI Generate skipped: active file is invalid:" << sourceFilePath;
+        return;
+    }
+
     const QString agentScriptPath = resolveProjectScriptPath(QStringLiteral("python/agent.py"));
     if (agentScriptPath.isEmpty()) {
         qWarning() << "AI Generate failed: unable to locate python/agent.py.";
         return;
     }
 
+    qputenv("TEXTEDITOR_ACTIVE_FILE", QDir::toNativeSeparators(sourceInfo.absoluteFilePath()).toUtf8());
     launchPythonScript(agentScriptPath, false);
 }
 

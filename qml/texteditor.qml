@@ -24,6 +24,7 @@ ApplicationWindow {
 
     property bool runPending: false
     property bool debugPending: false
+    property bool aiGeneratePending: false
     property url runFileURL: ""
     property url runSelectedFile: ""
 
@@ -31,6 +32,7 @@ ApplicationWindow {
     function triggerRunAfterSave() {
         runPending = true
         debugPending = false
+        aiGeneratePending = false
 
         // If the document already has a filename, save in-place and run.
         if (documenthandler.fileUrl && documenthandler.fileUrl.toString() !== "") {
@@ -46,6 +48,7 @@ ApplicationWindow {
     function triggerDebugAfterSave() {
         debugPending = true
         runPending = false
+        aiGeneratePending = false
 
         // If the document already has a filename, save in-place and debug.
         if (documenthandler.fileUrl && documenthandler.fileUrl.toString() !== "") {
@@ -77,6 +80,30 @@ ApplicationWindow {
 
         const target = documenthandler.fileUrl ? documenthandler.fileUrl.toString() : ""
         backend.debugInTerminal(target, "");
+    }
+
+    function triggerAiGenerateAfterSave() {
+        aiGeneratePending = true
+        runPending = false
+        debugPending = false
+
+        if (documenthandler.fileUrl && documenthandler.fileUrl.toString() !== "") {
+            documenthandler.save()
+            doPendingAiGenerate()
+            return
+        }
+
+        saveDialog.open()
+    }
+
+    function doPendingAiGenerate() {
+        if (!aiGeneratePending)
+            return;
+
+        aiGeneratePending = false;
+
+        const target = documenthandler.fileUrl ? documenthandler.fileUrl.toString() : ""
+        backend.runAiGenerate(target, "");
     }
 
     DocumentHandler {
@@ -162,7 +189,9 @@ Action {
     Action {
         id: aiGenerateAction
         text: "AI Generate"
-        onTriggered: backend.runAiGenerate()
+        onTriggered: {
+            triggerAiGenerateAfterSave()
+        }
     }
 
     Action {
@@ -306,6 +335,7 @@ Action {
             // If Run/Debug was waiting on a filename, execute now.
             doPendingRun()
             doPendingDebug()
+            doPendingAiGenerate()
         }
     }
 

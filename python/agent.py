@@ -16,7 +16,6 @@ except ImportError:
 
 DEFAULT_MODEL = "gpt-5-codex"
 REPO_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_PROJECT_DIR = REPO_ROOT / "Projects" / "Test"
 MAX_FILE_BYTES = 100_000
 MAX_TOTAL_CONTEXT_CHARS = 120_000
 
@@ -79,50 +78,65 @@ def build_reasoning_model():
     return OpenAI(api_key=api_key)
 
 
-def resolve_project_dir(raw_path):
+def resolve_source_file(raw_path):
     raw = (raw_path or "").strip()
     if not raw:
-        return DEFAULT_PROJECT_DIR.resolve()
+        raise FileNotFoundError("TEXTEDITOR_ACTIVE_FILE was not provided.")
 
-    # Handle rooted-but-no-drive paths on Windows, e.g. "/Projects/Test".
+    candidate_paths = []
+
     if raw.startswith(("/", "\\")):
-        workspace_candidate = (REPO_ROOT / raw.lstrip("/\\")).resolve()
-        if workspace_candidate.exists():
-            return workspace_candidate
+        candidate_paths.append((REPO_ROOT / raw.lstrip("/\\")).resolve())
 
     requested = Path(raw).expanduser()
-    if requested.exists():
-        return requested.resolve()
+    candidate_paths.append(requested.resolve())
 
-    # Allow "/Projects/Test" style paths from workspace root on Windows.
     if requested.is_absolute() and len(requested.parts) > 1:
         relative_from_root = Path(*requested.parts[1:])
-        workspace_candidate = (REPO_ROOT / relative_from_root).resolve()
-        if workspace_candidate.exists():
-            return workspace_candidate
+        candidate_paths.append((REPO_ROOT / relative_from_root).resolve())
 
-    repo_relative = (REPO_ROOT / requested).resolve()
-    if repo_relative.exists():
-        return repo_relative
+    candidate_paths.append((REPO_ROOT / requested).resolve())
+
+    seen = set()
+    for candidate in candidate_paths:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        if candidate.exists() and candidate.is_file():
+            return candidate
 
     raise FileNotFoundError(
-        f"Project directory not found: {raw}. "
-        f"Checked raw path, workspace-root style path, and repo-relative path."
+        "Active source file not found. "
+        f"Expected TEXTEDITOR_ACTIVE_FILE='{raw}' to point to an existing file."
     )
 
 
-def build_project_context(project_dir):
-    sections = [f"Project root: {project_dir}"]
-    total_chars = len(sections[0])
+def build_project_context(project_dir, source_file):
+    sections = [f"Project root: {project_dir}", f"Primary file: {source_file.name}"]
+    total_chars = len(sections[0]) + len(sections[1]) + 2
     files_added = 0
     files_skipped = 0
 
-    for file_path in sorted(project_dir.rglob("*")):
-        if not file_path.is_file():
+    file_candidates = [source_file]
+    file_candidates.extend(sorted(project_dir.rglob("*")))
+    seen_files = set()
+
+    for file_path in file_candidates:
+        try:
+            resolved_file = file_path.resolve()
+        except OSError:
+            files_skipped += 1
+            continue
+
+        if resolved_file in seen_files:
+            continue
+        seen_files.add(resolved_file)
+
+        if not resolved_file.is_file():
             continue
 
         try:
-            file_size = file_path.stat().st_size
+            file_size = resolved_file.stat().st_size
         except OSError:
             files_skipped += 1
             continue
@@ -132,12 +146,16 @@ def build_project_context(project_dir):
             continue
 
         try:
-            content = file_path.read_text(encoding="utf-8")
+            content = resolved_file.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError):
             files_skipped += 1
             continue
 
-        relative_name = file_path.relative_to(project_dir).as_posix()
+        try:
+            relative_name = resolved_file.relative_to(project_dir).as_posix()
+        except ValueError:
+            files_skipped += 1
+            continue
         file_block = f"\n\n### {relative_name}\n```text\n{content}\n```"
 
         if total_chars + len(file_block) > MAX_TOTAL_CONTEXT_CHARS:
@@ -180,19 +198,28 @@ def extract_python_code(raw_text):
     return text
 
 
-def write_generated_code(project_dir, generated_code):
-    target_name = os.getenv("TEXTEDITOR_TARGET_FILE", "test.py").strip() or "test.py"
-    target_path = Path(target_name)
-    if target_path.is_absolute():
-        raise ValueError("TEXTEDITOR_TARGET_FILE must be a relative path inside the project directory.")
+def choose_output_file(source_file):
+    requested_name = os.getenv("TEXTEDITOR_TARGET_FILE", "").strip()
+    source_directory = source_file.parent.resolve()
 
-    resolved_project_dir = project_dir.resolve()
-    output_file = (resolved_project_dir / target_path).resolve()
-    try:
-        output_file.relative_to(resolved_project_dir)
-    except ValueError as exc:
-        raise ValueError("Output path escapes the project directory.") from exc
+    if requested_name:
+        target_path = Path(requested_name)
+        if target_path.is_absolute():
+            raise ValueError("TEXTEDITOR_TARGET_FILE must be a file name, not an absolute path.")
+        if target_path.parent not in (Path(""), Path(".")):
+            raise ValueError("TEXTEDITOR_TARGET_FILE must not include directories.")
+        return source_directory / target_path.name
 
+    base_name = f"{source_file.stem}_generated"
+    candidate = source_directory / f"{base_name}.py"
+    counter = 1
+    while candidate.exists():
+        candidate = source_directory / f"{base_name}_{counter}.py"
+        counter += 1
+    return candidate
+
+
+def write_generated_code(output_file, generated_code):
     output_file.parent.mkdir(parents=True, exist_ok=True)
 
     backup_file = None
@@ -209,10 +236,11 @@ def main():
     client = build_reasoning_model()
     model_name = load_selected_model()
 
-    # Supports an override like TEXTEDITOR_PROJECT_DIR=/Projects/Test
-    requested_path = os.getenv("TEXTEDITOR_PROJECT_DIR", "/Projects/Test")
-    project_dir = resolve_project_dir(requested_path)
-    project_context = build_project_context(project_dir)
+    active_file_path = os.getenv("TEXTEDITOR_ACTIVE_FILE", "")
+    source_file = resolve_source_file(active_file_path)
+    project_dir = source_file.parent.resolve()
+    project_context = build_project_context(project_dir, source_file)
+    output_file = choose_output_file(source_file).resolve()
 
     response = client.responses.create(
         model=model_name,
@@ -228,7 +256,8 @@ def main():
             {
                 "role": "user",
                 "content": (
-                    "Task: Generate a GTK GUI for test.py using the project context below.\n"
+                    f"Task: Generate a GTK GUI for {source_file.name} using the project context below.\n"
+                    f"Write the result as a standalone Python module for a new file named {output_file.name}.\n"
                     "Requirement: if there is a decorator @output \"Hello World\", remove that "
                     "decorator usage and render the same text in a GTK text widget.\n"
                     "Return only the resulting Python code.\n\n"
@@ -239,9 +268,10 @@ def main():
     )
 
     generated_code = extract_python_code(response.output_text)
-    output_file, backup_file = write_generated_code(project_dir, generated_code)
+    output_file, backup_file = write_generated_code(output_file, generated_code)
 
-    print(f"Updated file: {output_file}")
+    print(f"Source file: {source_file}")
+    print(f"Generated file: {output_file}")
     if backup_file is not None:
         print(f"Backup saved: {backup_file}")
 

@@ -35,7 +35,7 @@ public:
 
     Q_INVOKABLE void runInTerminal(const QString &filePath, const QString &fileName);
     Q_INVOKABLE void debugInTerminal(const QString &filePath, const QString &fileName);
-    Q_INVOKABLE void runAiGenerate();
+    Q_INVOKABLE void runAiGenerate(const QString &filePath, const QString &fileName);
     Q_INVOKABLE void uploadTemplateDirectory(const QString &directoryPath);
     Q_INVOKABLE void uploadTemplateDirectoryInteractive();
     Q_INVOKABLE QString defaultAiModel() const;
