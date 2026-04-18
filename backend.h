@@ -57,9 +57,7 @@ public slots:
 
 
 private:
-    bool copyDirectoryRecursively(const QString &sourcePath, const QString &destinationPath, QString *errorMessage) const;
     QString resolveTemplatesDirectory() const;
-    QString nextAvailableDirectoryPath(const QString &directoryPath) const;
     QString normalizeAiModel(const QString &value) const;
     QString aiSettingsFilePath() const;
     bool saveAiSettingsToDisk(const QString &modelValue) const;

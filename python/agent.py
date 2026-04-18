@@ -1,3 +1,6 @@
+import ast
+import base64
+import hashlib
 import json
 import os
 import re
@@ -22,11 +25,12 @@ DEFAULT_MODEL = "gpt-5-codex"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 MAX_FILE_BYTES = 100_000
 MAX_TOTAL_CONTEXT_CHARS = 22_000
-DEFAULT_SMOLAGENTS_FALLBACK_MODEL = "gpt-4o-mini"
+DEFAULT_SMOLAGENTS_FALLBACK_MODEL = "gpt-4.1"
 MAX_TEMPLATE_IMAGES_FOR_PROMPT = 8
 MAX_TEMPLATE_ANALYSIS_CHARS = 8_000
+MAX_TEMPLATE_EMBED_BYTES = 5_000_000
 REACT_PLANNING_INTERVAL = 1
-REACT_MAX_STEPS = 4
+REACT_MAX_STEPS = 20
 RESPONSES_ONLY_MODEL_PREFIXES = (
     "gpt-5",
     "o1",
@@ -41,6 +45,21 @@ MAX_TEMPLATE_WINDOW_HEIGHT = 1200
 MAX_TEMPLATE_ACTION_BUTTONS = 4
 MAX_SOURCE_FILE_CONTEXT_CHARS = 9_000
 MAX_AUX_FILE_LISTING = 30
+MAX_FORM_ITEMS = 40
+MAX_FORM_ITEM_CHARS = 120
+GENERIC_WINDOW_TITLES = {
+    "generated interface",
+    "hello app",
+    "hello world",
+    "app",
+}
+GENERIC_WIDGET_HINTS = (
+    "click me",
+    "type here",
+    "action 1",
+    "action 2",
+    "hello app",
+)
 
 
 def clamp_int(value, minimum, maximum):
@@ -105,16 +124,45 @@ def load_api_key():
     return api_key
 
 
+def configure_console_output_encoding():
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
+def _load_int_setting(name, default_value, minimum, maximum):
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default_value
+    try:
+        parsed = int(raw)
+    except ValueError:
+        return default_value
+    return max(int(minimum), min(int(maximum), parsed))
+
+
+def load_react_max_steps():
+    return _load_int_setting("TEXTEDITOR_REACT_MAX_STEPS", REACT_MAX_STEPS, 4, 80)
+
+
+def load_react_planning_interval():
+    return _load_int_setting("TEXTEDITOR_REACT_PLANNING_INTERVAL", REACT_PLANNING_INTERVAL, 1, 8)
+
+
 def resolve_smolagents_model(model_name):
-    selected = (model_name or "").strip()
+    selected = (model_name or "").strip() or DEFAULT_MODEL
     fallback = os.getenv("TEXTEDITOR_SMOLAGENTS_FALLBACK_MODEL", DEFAULT_SMOLAGENTS_FALLBACK_MODEL).strip()
     fallback = fallback or DEFAULT_SMOLAGENTS_FALLBACK_MODEL
     normalized = selected.lower()
 
     if any(normalized.startswith(prefix) for prefix in RESPONSES_ONLY_MODEL_PREFIXES):
         return fallback, (
-            f"Selected model '{selected}' is Responses-only. "
-            f"Using chat-compatible fallback '{fallback}' for SmolAgents tool-calling."
+            f"Selected model '{selected}' is Responses-only for this SDK path. "
+            f"Using chat-compatible fallback '{fallback}' for SmolAgents."
         )
 
     return selected, None
@@ -123,6 +171,8 @@ def resolve_smolagents_model(model_name):
 def build_reasoning_agent(model_name, tools=None):
     api_key = load_api_key()
     resolved_model, warning = resolve_smolagents_model(model_name)
+    react_planning_interval = load_react_planning_interval()
+    react_max_steps = load_react_max_steps()
     if warning:
         print(warning)
 
@@ -134,8 +184,8 @@ def build_reasoning_agent(model_name, tools=None):
     return CodeAgent(
         tools=agent_tools,
         model=model,
-        planning_interval=REACT_PLANNING_INTERVAL,
-        max_steps=REACT_MAX_STEPS,
+        planning_interval=react_planning_interval,
+        max_steps=react_max_steps,
     )
 
 
@@ -440,7 +490,44 @@ def infer_projects_subdirectory(source_file):
     return relative_parent
 
 
-def build_generation_task(source_file, output_file, project_context, template_context, template_png_count):
+def normalize_form_items(form_items):
+    cleaned_items = []
+    seen = set()
+    for raw_item in form_items or []:
+        text = str(raw_item or "").strip()
+        text = re.sub(r"\s+", " ", text)
+        if not text:
+            continue
+        text = text[:MAX_FORM_ITEM_CHARS]
+        key = text.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        cleaned_items.append(text)
+        if len(cleaned_items) >= MAX_FORM_ITEMS:
+            break
+    return cleaned_items
+
+
+def build_form_requirement_text(form_items):
+    cleaned_items = normalize_form_items(form_items)
+
+    base_rule = (
+        "Requirement: if a function has a decorator @form (case-insensitive), inspect the function directly below "
+        "that decorator, extract literal string items, and render them as a visible selectable GTK list widget."
+    )
+    if not cleaned_items:
+        return base_rule
+
+    serialized_items = ", ".join(json.dumps(item) for item in cleaned_items)
+    return (
+        f"{base_rule}\n"
+        f"Requirement: use these extracted @form items in order: [{serialized_items}]."
+    )
+
+
+def build_generation_task(source_file, output_file, project_context, template_context, template_png_count, form_items=None):
+    form_requirement = build_form_requirement_text(form_items)
     projects_hint = infer_projects_subdirectory(source_file)
     if projects_hint:
         tool_hint = (
@@ -461,20 +548,45 @@ def build_generation_task(source_file, output_file, project_context, template_co
             "ReAct requirement: follow iterative Thought -> Action -> Observation steps before final answer.\n"
             "Mandatory tool sequence before final code: "
             "1) locate_in_templates_directory, 2) read_original_pngs, 3) read_pngs.\n"
-            "Output GTK code that mirrors the original template image dimensions and composition."
+            "Output GTK code that mirrors the original template image dimensions and composition.\n"
+            "Template-first text rule: do NOT inject source-derived @Header/@output text overlays unless the text is "
+            "visually supported by template evidence."
+        )
+        source_behavior_requirements = (
+            "Requirement: if a function has a decorator @resize (case-insensitive), the main GTK window may be "
+            "resizable.\n"
+            f"{form_requirement}"
         )
     else:
         template_hint = (
             "Template requirement: no template PNGs were found in the available Templates directories. "
             "Fallback to source code context for layout decisions."
         )
+        source_behavior_requirements = (
+            "Requirement: if a function has a decorator @Header (case-insensitive), extract the first literal "
+            "string from that function's print(...) or return statement and render it as the GTK header text.\n"
+            "Requirement: if there is a decorator @output \"Hello World\", remove that "
+            "decorator usage and render the same text in a GTK text widget.\n"
+            "Requirement: if a function has a decorator @resize (case-insensitive), the main GTK window must be "
+            "resizable.\n"
+            f"{form_requirement}"
+        )
+    tool_safety_hint = (
+        "Tool safety rule: in ReAct actions, do not call open(), read_text(), write_text(), or any direct "
+        "filesystem I/O; use only the provided tools from python/model.py."
+    )
+    reasoning_depth_hint = (
+        "Reasoning depth requirement: when tools are available, perform multiple Thought -> Action -> Observation "
+        "cycles before final code."
+    )
 
     return (
         f"Task: Generate a GTK GUI for {source_file.name}.\n"
         f"Write the result as a standalone Python module for a new file named {output_file.name}.\n"
-        "Requirement: if there is a decorator @output \"Hello World\", remove that "
-        "decorator usage and render the same text in a GTK text widget.\n"
+        f"{source_behavior_requirements}\n"
         f"{template_hint}\n"
+        f"{tool_safety_hint}\n"
+        f"{reasoning_depth_hint}\n"
         "You already have access to tools from python/model.py. Use them when needed.\n"
         f"{tool_hint}\n"
         "Return only the resulting Python code.\n\n"
@@ -567,9 +679,364 @@ def looks_like_gtk_code(code_text):
     )
 
 
+def _normalize_text_token(value):
+    text = str(value or "").strip().lower()
+    return re.sub(r"\s+", " ", text)
+
+
+def _template_strict_mode_enabled():
+    value = _normalize_text_token(os.getenv("TEXTEDITOR_TEMPLATE_STRICT", "1"))
+    return value not in {"0", "false", "no", "off"}
+
+
+def _code_references_selected_template(code_text, selected_template):
+    lowered = str(code_text or "").lower()
+    if not lowered:
+        return False
+
+    if "gtk.image.new_from_file" in lowered and ".png" in lowered:
+        return True
+
+    path = ""
+    if isinstance(selected_template, dict):
+        path = str(selected_template.get("path", "") or "").strip()
+
+    if not path:
+        return False
+
+    normalized_path = path.replace("\\", "/").lower()
+    file_name = Path(path).name.lower()
+    stem = Path(path).stem.lower()
+
+    return (
+        (normalized_path and normalized_path in lowered)
+        or (file_name and file_name in lowered)
+        or (stem and stem in lowered)
+    )
+
+
+def _code_looks_generic(code_text):
+    lowered = str(code_text or "").lower()
+    if not lowered:
+        return True
+
+    hint_hits = sum(1 for hint in GENERIC_WIDGET_HINTS if hint in lowered)
+    return hint_hits >= 2
+
+
+def _code_uses_template_overlay_chrome(code_text):
+    lowered = str(code_text or "").lower()
+    if not lowered:
+        return False
+
+    noisy_widget_patterns = (
+        "gtk.entry(",
+        "gtk.textview(",
+        "gtk.scrolledwindow(",
+        "gtk.frame(",
+        "gtk.button(",
+        "action 1",
+        "action 2",
+        "navigation",
+    )
+    return any(pattern in lowered for pattern in noisy_widget_patterns)
+
+
+def should_fallback_to_template_synthesis(generated_code, template_png_count, selected_template):
+    if template_png_count <= 0:
+        return False
+
+    if not looks_like_gtk_code(generated_code):
+        return True
+
+    references_template = _code_references_selected_template(generated_code, selected_template)
+    lowered = str(generated_code or "").lower()
+    template_is_simple = True
+    if isinstance(selected_template, dict):
+        template_is_simple = int(selected_template.get("region_count", 0) or 0) <= 2
+
+    if _template_strict_mode_enabled():
+        if not references_template:
+            return True
+
+        # Strict mode rejects generic/chrome-heavy output for simple templates.
+        if template_is_simple and _code_uses_template_overlay_chrome(generated_code):
+            return True
+
+        # For simple templates, reject extra top-left header overlays over a template image.
+        if template_is_simple and "overlay.add_overlay(header)" in lowered:
+            return True
+
+        return False
+
+    if references_template:
+        return False
+
+    return _code_looks_generic(generated_code)
+
+
 def is_context_length_error(exc: Exception) -> bool:
     text = str(exc).lower()
     return "context_length_exceeded" in text or "maximum context length" in text
+
+
+def _decorator_name(node):
+    candidate = node.func if isinstance(node, ast.Call) else node
+    if isinstance(candidate, ast.Name):
+        return str(candidate.id or "").strip().lower()
+    if isinstance(candidate, ast.Attribute):
+        return str(candidate.attr or "").strip().lower()
+    return ""
+
+
+def _extract_constant_string(node):
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        value = node.value.strip()
+        if value:
+            return value
+    return None
+
+
+def _extract_string_from_header_function(function_node):
+    for node in ast.walk(function_node):
+        if isinstance(node, ast.Call):
+            if _decorator_name(node.func) != "print":
+                continue
+            for arg in node.args:
+                value = _extract_constant_string(arg)
+                if value:
+                    return value
+        elif isinstance(node, ast.Return):
+            value = _extract_constant_string(node.value)
+            if value:
+                return value
+    return None
+
+
+def _extract_header_text_from_content(content):
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        tree = None
+
+    if tree is not None:
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+
+            for decorator in node.decorator_list:
+                if _decorator_name(decorator) != "header":
+                    continue
+
+                if isinstance(decorator, ast.Call):
+                    for arg in decorator.args:
+                        value = _extract_constant_string(arg)
+                        if value:
+                            return value[:240]
+
+                value = _extract_string_from_header_function(node)
+                if value:
+                    return value[:240]
+
+    inline_pattern = r"@header\s*(?:\(\s*(['\"])(?P<call_value>.*?)\1\s*\)|\s+(['\"])(?P<line_value>.*?)\3)"
+    inline_match = re.search(inline_pattern, content, flags=re.IGNORECASE | re.DOTALL)
+    if inline_match:
+        value = (inline_match.group("call_value") or inline_match.group("line_value") or "").strip()
+        if value:
+            return value[:240]
+
+    header_marker = re.search(r"@header\b", content, flags=re.IGNORECASE)
+    if header_marker:
+        remainder = content[header_marker.end() :]
+        fallback_patterns = [
+            r"print\(\s*(['\"])(?P<value>.*?)\1\s*\)",
+            r"return\s+(['\"])(?P<value>.*?)\1",
+        ]
+        for pattern in fallback_patterns:
+            fallback_match = re.search(pattern, remainder, flags=re.IGNORECASE | re.DOTALL)
+            if not fallback_match:
+                continue
+            value = (fallback_match.group("value") or "").strip()
+            if value:
+                return value[:240]
+
+    return None
+
+
+def extract_header_text_from_source(source_file):
+    try:
+        content = source_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+
+    return _extract_header_text_from_content(content)
+
+
+def _source_requests_resizable_window_from_content(content):
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        tree = None
+
+    if tree is not None:
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            for decorator in node.decorator_list:
+                if _decorator_name(decorator) == "resize":
+                    return True
+
+    return re.search(r"@resize\b", content, flags=re.IGNORECASE) is not None
+
+
+def source_requests_resizable_window(source_file):
+    try:
+        content = source_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False
+
+    return _source_requests_resizable_window_from_content(content)
+
+
+def _normalize_form_item(value):
+    text = str(value or "").strip()
+    if not text:
+        return None
+    text = re.sub(r"\s+", " ", text)
+    return text[:MAX_FORM_ITEM_CHARS]
+
+
+def _append_unique_form_items(target_items, candidates):
+    seen = {str(item).lower() for item in target_items}
+    for candidate in candidates or []:
+        normalized = _normalize_form_item(candidate)
+        if not normalized:
+            continue
+        key = normalized.lower()
+        if key in seen:
+            continue
+        target_items.append(normalized)
+        seen.add(key)
+        if len(target_items) >= MAX_FORM_ITEMS:
+            break
+    return target_items
+
+
+def _extract_string_items_from_node(node):
+    if node is None:
+        return []
+
+    single_value = _extract_constant_string(node)
+    if single_value:
+        return [single_value]
+
+    values = []
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        for element in node.elts:
+            element_value = _extract_constant_string(element)
+            if element_value:
+                values.append(element_value)
+        return values
+
+    if isinstance(node, ast.Dict):
+        for value_node in node.values:
+            element_value = _extract_constant_string(value_node)
+            if element_value:
+                values.append(element_value)
+        return values
+
+    if isinstance(node, ast.Call):
+        call_name = _decorator_name(node.func)
+        if call_name in {"list", "tuple", "set"} and node.args:
+            return _extract_string_items_from_node(node.args[0])
+
+    return values
+
+
+def _extract_form_items_from_function(function_node):
+    items = []
+
+    for statement in function_node.body:
+        if isinstance(statement, ast.Assign):
+            _append_unique_form_items(items, _extract_string_items_from_node(statement.value))
+        elif isinstance(statement, ast.AnnAssign):
+            _append_unique_form_items(items, _extract_string_items_from_node(statement.value))
+        elif isinstance(statement, ast.Return):
+            _append_unique_form_items(items, _extract_string_items_from_node(statement.value))
+        elif isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call):
+            call = statement.value
+            call_name = _decorator_name(call.func)
+            if call_name == "append":
+                for arg in call.args:
+                    _append_unique_form_items(items, _extract_string_items_from_node(arg))
+            elif call_name == "extend" and call.args:
+                _append_unique_form_items(items, _extract_string_items_from_node(call.args[0]))
+
+        if len(items) >= MAX_FORM_ITEMS:
+            return items[:MAX_FORM_ITEMS]
+
+    return items
+
+
+def _extract_form_items_from_content(content):
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        tree = None
+
+    if tree is not None:
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+
+            has_form_decorator = False
+            items = []
+            for decorator in node.decorator_list:
+                if _decorator_name(decorator) != "form":
+                    continue
+                has_form_decorator = True
+                if isinstance(decorator, ast.Call):
+                    for arg in decorator.args:
+                        _append_unique_form_items(items, _extract_string_items_from_node(arg))
+
+            if not has_form_decorator:
+                continue
+
+            _append_unique_form_items(items, _extract_form_items_from_function(node))
+            if items:
+                return items[:MAX_FORM_ITEMS]
+
+            # If we found @form but no parseable literals, stop early to avoid
+            # collecting unrelated assignments elsewhere in the file.
+            return []
+
+    form_marker = re.search(r"@form\b", content, flags=re.IGNORECASE)
+    if not form_marker:
+        return []
+
+    remainder = content[form_marker.end() :]
+    matches = re.finditer(
+        r"(?m)^\s*[A-Za-z_]\w*\s*=\s*(['\"])(?P<value>.*?)\1\s*$",
+        remainder,
+    )
+    items = []
+    for match in matches:
+        value = _normalize_form_item(match.group("value"))
+        if not value:
+            continue
+        _append_unique_form_items(items, [value])
+        if len(items) >= MAX_FORM_ITEMS:
+            break
+    return items
+
+
+def extract_form_items_from_source(source_file):
+    try:
+        content = source_file.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return []
+
+    return _extract_form_items_from_content(content)
 
 
 def extract_output_text_from_source(source_file):
@@ -577,6 +1044,10 @@ def extract_output_text_from_source(source_file):
         content = source_file.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
         return "Generated Interface"
+
+    header_value = _extract_header_text_from_content(content)
+    if header_value:
+        return header_value
 
     patterns = [
         r"@output\s+(['\"])(?P<value>.*?)\1",
@@ -593,6 +1064,103 @@ def extract_output_text_from_source(source_file):
             return value[:240]
 
     return source_file.stem.replace("_", " ").strip().title() or "Generated Interface"
+
+
+def apply_resize_directive_to_generated_code(generated_code, should_resize):
+    if not should_resize:
+        return generated_code
+
+    text = str(generated_code or "")
+    if not text:
+        return text
+
+    if re.search(r"\bself\.set_resizable\s*\(\s*True\s*\)", text):
+        return text
+
+    updated = re.sub(
+        r"\bself\.set_resizable\s*\(\s*False\s*\)",
+        "self.set_resizable(True)",
+        text,
+    )
+    if updated != text:
+        return updated
+
+    line_patterns = (
+        re.compile(r"(?m)^(?P<indent>\s*)self\.set_default_size\([^\n]*\)\s*$"),
+        re.compile(r"(?m)^(?P<indent>\s*)super\(\).__init__\([^\n]*\)\s*$"),
+    )
+    for pattern in line_patterns:
+        match = pattern.search(text)
+        if not match:
+            continue
+        insertion = f"{match.group(0)}\n{match.group('indent')}self.set_resizable(True)"
+        return text[: match.start()] + insertion + text[match.end() :]
+
+    return text
+
+
+def _build_form_injection_block(form_items, indent):
+    item_literal = json.dumps(form_items)
+    return "\n".join(
+        [
+            f"{indent}# @form items injected by texteditor agent",
+            f"{indent}form_items = {item_literal}",
+            f"{indent}if form_items:",
+            f"{indent}    form_frame = Gtk.Frame(label='Items')",
+            f"{indent}    form_frame.set_margin_top(10)",
+            f"{indent}    form_frame.set_margin_start(10)",
+            f"{indent}    form_frame.set_margin_end(10)",
+            f"{indent}",
+            f"{indent}    form_list = Gtk.ListBox()",
+            f"{indent}    form_list.set_selection_mode(Gtk.SelectionMode.SINGLE)",
+            f"{indent}    for form_item in form_items:",
+            f"{indent}        row = Gtk.ListBoxRow()",
+            f"{indent}        row_label = Gtk.Label(label=form_item, xalign=0.0)",
+            f"{indent}        row_label.set_margin_top(6)",
+            f"{indent}        row_label.set_margin_bottom(6)",
+            f"{indent}        row_label.set_margin_start(8)",
+            f"{indent}        row_label.set_margin_end(8)",
+            f"{indent}        row.add(row_label)",
+            f"{indent}        form_list.add(row)",
+            f"{indent}    form_frame.add(form_list)",
+            f"{indent}",
+            f"{indent}    existing_child = self.get_child()",
+            f"{indent}    if isinstance(existing_child, Gtk.Box):",
+            f"{indent}        existing_child.pack_start(form_frame, False, False, 0)",
+            f"{indent}    else:",
+            f"{indent}        wrapper_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10)",
+            f"{indent}        wrapper_box.set_border_width(10)",
+            f"{indent}        if existing_child is not None:",
+            f"{indent}            self.remove(existing_child)",
+            f"{indent}            wrapper_box.pack_start(existing_child, True, True, 0)",
+            f"{indent}        wrapper_box.pack_start(form_frame, False, False, 0)",
+            f"{indent}        self.add(wrapper_box)",
+        ]
+    )
+
+
+def apply_form_directive_to_generated_code(generated_code, form_items):
+    cleaned_items = normalize_form_items(form_items)
+    if not cleaned_items:
+        return generated_code
+
+    text = str(generated_code or "")
+    if not text or "Gtk" not in text:
+        return text
+
+    marker = "# @form items injected by texteditor agent"
+    if marker in text:
+        return text
+
+    if "Gtk.ListBox" in text and all(item in text for item in cleaned_items):
+        return text
+
+    insertion_match = re.search(r"(?m)^(?P<indent>\s*)self\.add\([^\n]*\)\s*$", text)
+    if not insertion_match:
+        return text
+
+    insertion = _build_form_injection_block(cleaned_items, insertion_match.group("indent"))
+    return text[: insertion_match.end()] + "\n" + insertion + text[insertion_match.end() :]
 
 
 def pick_primary_template_entry(template_analysis, template_png_paths, source_file=None):
@@ -668,43 +1236,133 @@ def _template_background_hex(entry):
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
-def _build_visual_match_code(output_text, app_id, window_w, window_h, background_hex):
+def _preferred_window_title(output_text, template_image_path):
+    value = str(output_text or "").strip()
+    return value or "Generated Interface"
+
+
+def _load_template_image_base64(template_image_path):
+    image_path = str(template_image_path or "").strip()
+    if not image_path:
+        return ""
+
+    path = Path(image_path)
+    if not path.exists() or not path.is_file():
+        return ""
+
+    try:
+        raw_bytes = path.read_bytes()
+    except OSError:
+        return ""
+
+    if len(raw_bytes) > MAX_TEMPLATE_EMBED_BYTES:
+        return ""
+
+    return base64.b64encode(raw_bytes).decode("ascii")
+
+
+def _build_visual_match_code(
+    window_title,
+    overlay_text,
+    overlay_alignment,
+    app_id,
+    window_w,
+    window_h,
+    background_hex,
+    template_image_path,
+    template_image_b64,
+    is_resizable,
+):
     return "\n".join(
         [
+            "import base64",
+            "import hashlib",
+            "import os",
             "import sys",
             "",
             "import gi",
             'gi.require_version("Gtk", "3.0")',
-            "from gi.repository import Gdk, Gtk",
+            "from gi.repository import Gdk, GdkPixbuf, Gtk",
             "",
             f"WINDOW_BG = {json.dumps(background_hex)}",
+            f"TEMPLATE_IMAGE = {json.dumps(template_image_path)}",
+            f"TEMPLATE_IMAGE_B64 = {json.dumps(template_image_b64)}",
+            f"OVERLAY_TEXT = {json.dumps(overlay_text)}",
+            f"OVERLAY_ALIGNMENT = {json.dumps(overlay_alignment)}",
+            "",
+            "def resolve_template_image():",
+            "    if TEMPLATE_IMAGE and os.path.isfile(TEMPLATE_IMAGE):",
+            "        return TEMPLATE_IMAGE",
+            "",
+            "    if not TEMPLATE_IMAGE_B64:",
+            "        return ''",
+            "",
+            "    try:",
+            "        cache_dir = os.path.join(os.path.expanduser('~'), '.texteditor_template_cache')",
+            "        os.makedirs(cache_dir, exist_ok=True)",
+            "        cache_name = hashlib.sha256(TEMPLATE_IMAGE_B64.encode('ascii')).hexdigest() + '.png'",
+            "        cache_path = os.path.join(cache_dir, cache_name)",
+            "        if not os.path.isfile(cache_path):",
+            "            with open(cache_path, 'wb') as cache_file:",
+            "                cache_file.write(base64.b64decode(TEMPLATE_IMAGE_B64))",
+            "        return cache_path",
+            "    except Exception:",
+            "        return ''",
             "",
             "class TemplateGeneratedWindow(Gtk.ApplicationWindow):",
             "    def __init__(self, app):",
-            f"        super().__init__(application=app, title={json.dumps(output_text)})",
+            f"        super().__init__(application=app, title={json.dumps(window_title)})",
             f"        self.set_default_size({window_w}, {window_h})",
             "        self.set_position(Gtk.WindowPosition.CENTER)",
-            "        self.set_resizable(False)",
+            f"        self.set_resizable({str(bool(is_resizable))})",
             "",
-            "        body = Gtk.EventBox()",
-            "        body.set_name('template_body')",
-            "        body.set_hexpand(True)",
-            "        body.set_vexpand(True)",
-            "        self.add(body)",
+            "        overlay = Gtk.Overlay()",
+            "        overlay.set_hexpand(True)",
+            "        overlay.set_vexpand(True)",
+            "        self.add(overlay)",
             "",
-            "        css = Gtk.CssProvider()",
-            "        css.load_from_data((",
-            "            '#template_body {'",
-            "            '  background-color: ' + WINDOW_BG + ';'",
-            "            '}'",
-            "        ).encode('utf-8'))",
-            "        screen = Gdk.Screen.get_default()",
-            "        if screen is not None:",
-            "            Gtk.StyleContext.add_provider_for_screen(",
-            "                screen,",
-            "                css,",
-            "                Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,",
-            "            )",
+            "        resolved_template_image = resolve_template_image()",
+            "        if resolved_template_image and os.path.isfile(resolved_template_image):",
+            "            image = Gtk.Image()",
+            "            try:",
+            "                pixbuf = GdkPixbuf.Pixbuf.new_from_file(resolved_template_image)",
+            f"                scaled = pixbuf.scale_simple({window_w}, {window_h}, GdkPixbuf.InterpType.BILINEAR)",
+            "                image.set_from_pixbuf(scaled if scaled is not None else pixbuf)",
+            "            except Exception:",
+            "                image = Gtk.Image.new_from_file(resolved_template_image)",
+            "            overlay.add(image)",
+            "        else:",
+            "            body = Gtk.EventBox()",
+            "            body.set_name('template_body')",
+            "            body.set_hexpand(True)",
+            "            body.set_vexpand(True)",
+            "            overlay.add(body)",
+            "",
+            "            css = Gtk.CssProvider()",
+            "            css.load_from_data((",
+            "                '#template_body {'",
+            "                '  background-color: ' + WINDOW_BG + ';'",
+            "                '}'",
+            "            ).encode('utf-8'))",
+            "            screen = Gdk.Screen.get_default()",
+            "            if screen is not None:",
+            "                Gtk.StyleContext.add_provider_for_screen(",
+            "                    screen,",
+            "                    css,",
+            "                    Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,",
+            "                )",
+            "",
+            "        if OVERLAY_TEXT:",
+            "            header = Gtk.Label(label=OVERLAY_TEXT)",
+            "            if OVERLAY_ALIGNMENT == 'center':",
+            "                header.set_halign(Gtk.Align.CENTER)",
+            "                header.set_valign(Gtk.Align.CENTER)",
+            "            else:",
+            "                header.set_halign(Gtk.Align.START)",
+            "                header.set_valign(Gtk.Align.START)",
+            "                header.set_margin_start(18)",
+            "                header.set_margin_top(14)",
+            "            overlay.add_overlay(header)",
             "",
             "class TemplateGeneratedApp(Gtk.Application):",
             "    def __init__(self):",
@@ -761,13 +1419,50 @@ def _largest_region_for_roles(regions, roles):
     return candidates[0][1]
 
 
-def build_template_driven_code(source_file, output_file, template_analysis, template_png_paths):
+def _detect_center_text_region(regions, window_w, window_h):
+    if not isinstance(regions, list) or window_w <= 0 or window_h <= 0:
+        return False
+
+    center_x = window_w / 2.0
+    center_y = window_h / 2.0
+    max_center_distance = max(window_w, window_h) * 0.24
+
+    for region in regions:
+        if not isinstance(region, dict):
+            continue
+        role = str(region.get("role", ""))
+        if role not in {"button", "input", "panel", "content"}:
+            continue
+
+        x = int(region.get("x", 0))
+        y = int(region.get("y", 0))
+        w = int(region.get("width", 0))
+        h = int(region.get("height", 0))
+        if w <= 0 or h <= 0:
+            continue
+
+        rx = x + (w / 2.0)
+        ry = y + (h / 2.0)
+        dist = ((rx - center_x) ** 2 + (ry - center_y) ** 2) ** 0.5
+        area_ratio = float(w * h) / float(window_w * window_h)
+
+        if dist <= max_center_distance and 0.008 <= area_ratio <= 0.22:
+            return True
+
+    return False
+
+
+def build_template_driven_code(source_file, output_file, template_analysis, template_png_paths, form_items=None):
     primary = pick_primary_template_entry(
         template_analysis=template_analysis,
         template_png_paths=template_png_paths,
         source_file=source_file,
     )
+    form_items = normalize_form_items(form_items if form_items is not None else extract_form_items_from_source(source_file))
     output_text = extract_output_text_from_source(source_file)
+    explicit_header_text = extract_header_text_from_source(source_file)
+    header_text = explicit_header_text or output_text
+    resize_requested = source_requests_resizable_window(source_file)
 
     raw_w = int(primary.get("width", 960))
     raw_h = int(primary.get("height", 640))
@@ -856,6 +1551,18 @@ def build_template_driven_code(source_file, output_file, template_analysis, temp
     template_image_path = str(primary.get("path", "")).strip()
     if not template_image_path and template_png_paths:
         template_image_path = str(template_png_paths[0])
+    has_template_image = bool(template_image_path)
+    template_image_b64 = _load_template_image_base64(template_image_path) if has_template_image else ""
+    if form_items:
+        # Keep form list readable even when the uploaded template is dark/noisy.
+        template_image_path = ""
+        template_image_b64 = ""
+        has_template_image = False
+
+    if explicit_header_text:
+        window_title = explicit_header_text
+    else:
+        window_title = _preferred_window_title(output_text, "")
 
     app_id_stem = re.sub(r"[^a-z0-9]+", "", output_file.stem.lower())
     if not app_id_stem:
@@ -863,18 +1570,31 @@ def build_template_driven_code(source_file, output_file, template_analysis, temp
     app_id = f"com.texteditor.{app_id_stem}"
 
     use_visual_match_mode = (
+        has_template_image
+        or
         region_count <= 2
         or edge_density <= 0.028
         or (header_region is None and sidebar_region is None and content_region is None and input_region is None)
     )
-    if use_visual_match_mode:
+    if use_visual_match_mode and not form_items:
         background_hex = _template_background_hex(primary)
+        overlay_text = ""
+        overlay_alignment = "start"
+        if not has_template_image:
+            overlay_text = header_text
+            if _detect_center_text_region(regions, window_w, window_h):
+                overlay_alignment = "center"
         return _build_visual_match_code(
-            output_text=output_text,
+            window_title=window_title,
+            overlay_text=overlay_text,
+            overlay_alignment=overlay_alignment,
             app_id=app_id,
             window_w=window_w,
             window_h=window_h,
             background_hex=background_hex,
+            template_image_path=template_image_path,
+            template_image_b64=template_image_b64,
+            is_resizable=resize_requested,
         )
 
     hx, hy, hw, hh = header_box
@@ -896,14 +1616,20 @@ def build_template_driven_code(source_file, output_file, template_analysis, temp
         "",
         "class TemplateGeneratedWindow(Gtk.ApplicationWindow):",
         "    def __init__(self, app):",
-        f"        super().__init__(application=app, title={json.dumps(output_text)})",
+        f"        super().__init__(application=app, title={json.dumps(window_title)})",
         f"        self.set_default_size({window_w}, {window_h})",
         "        self.set_position(Gtk.WindowPosition.CENTER)",
-        "",
-        "        overlay = Gtk.Overlay()",
-        "        self.add(overlay)",
-        "",
-        "        if TEMPLATE_IMAGE and os.path.isfile(TEMPLATE_IMAGE):",
+    ]
+    if resize_requested:
+        lines.append("        self.set_resizable(True)")
+
+    lines.extend(
+        [
+            "",
+            "        overlay = Gtk.Overlay()",
+            "        self.add(overlay)",
+            "",
+            "        if TEMPLATE_IMAGE and os.path.isfile(TEMPLATE_IMAGE):",
         "            background = Gtk.Image.new_from_file(TEMPLATE_IMAGE)",
         "            background.set_hexpand(True)",
         "            background.set_vexpand(True)",
@@ -920,7 +1646,7 @@ def build_template_driven_code(source_file, output_file, template_analysis, temp
         f"        header_panel.set_size_request({hw}, {hh})",
         f"        fixed.put(header_panel, {hx}, {hy})",
         "",
-        f"        header_label = Gtk.Label(label={json.dumps(output_text)})",
+        f"        header_label = Gtk.Label(label={json.dumps(header_text)})",
         "        header_label.set_xalign(0.0)",
         f"        fixed.put(header_label, {header_text_x}, {header_text_y})",
         "",
@@ -931,20 +1657,48 @@ def build_template_driven_code(source_file, output_file, template_analysis, temp
         "        output_scroller = Gtk.ScrolledWindow()",
         "        output_scroller.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)",
         f"        output_scroller.set_size_request({cw}, {ch})",
-        "        output_view = Gtk.TextView()",
-        "        output_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)",
-        "        output_view.set_editable(False)",
-        "        output_view.set_cursor_visible(False)",
-        f"        output_view.get_buffer().set_text({json.dumps(output_text)})",
-        "        output_scroller.add(output_view)",
-        f"        fixed.put(output_scroller, {cx}, {cy})",
         "",
         "        entry = Gtk.Entry()",
         "        entry.set_placeholder_text('Type here')",
         f"        entry.set_size_request({iw}, {ih})",
         f"        fixed.put(entry, {ix}, {iy})",
         "",
-    ]
+        ]
+    )
+
+    if form_items:
+        lines.extend(
+            [
+                "        # @form items injected by texteditor agent",
+                f"        form_list = Gtk.ListBox()",
+                "        form_list.set_selection_mode(Gtk.SelectionMode.SINGLE)",
+                f"        for form_item in {json.dumps(form_items)}:",
+                "            row = Gtk.ListBoxRow()",
+                "            row_label = Gtk.Label(label=form_item, xalign=0.0)",
+                "            row_label.set_margin_top(6)",
+                "            row_label.set_margin_bottom(6)",
+                "            row_label.set_margin_start(8)",
+                "            row_label.set_margin_end(8)",
+                "            row.add(row_label)",
+                "            form_list.add(row)",
+                "        output_scroller.add(form_list)",
+                f"        fixed.put(output_scroller, {cx}, {cy})",
+                "",
+            ]
+        )
+    else:
+        lines.extend(
+            [
+                "        output_view = Gtk.TextView()",
+                "        output_view.set_wrap_mode(Gtk.WrapMode.WORD_CHAR)",
+                "        output_view.set_editable(False)",
+                "        output_view.set_cursor_visible(False)",
+                f"        output_view.get_buffer().set_text({json.dumps(output_text)})",
+                "        output_scroller.add(output_view)",
+                f"        fixed.put(output_scroller, {cx}, {cy})",
+                "",
+            ]
+        )
 
     for index, (bx, by, bw, bh) in enumerate(button_boxes, start=1):
         lines.extend(
@@ -979,10 +1733,14 @@ def build_template_driven_code(source_file, output_file, template_analysis, temp
 
 
 def main():
+    configure_console_output_encoding()
     model_name = load_selected_model()
+    react_max_steps = load_react_max_steps()
     active_file_path = os.getenv("TEXTEDITOR_ACTIVE_FILE", "")
     source_file = resolve_source_file(active_file_path)
     output_file = choose_output_file(source_file).resolve()
+    resize_requested = source_requests_resizable_window(source_file)
+    form_items = extract_form_items_from_source(source_file)
 
     (
         template_context,
@@ -1008,20 +1766,33 @@ def main():
         project_context=project_context,
         template_context=template_context,
         template_png_count=template_png_count,
+        form_items=form_items,
     )
 
     agent = build_reasoning_agent(model_name, tools=select_agent_tools(template_png_count))
     try:
-        result = agent.run(task=task, max_steps=REACT_MAX_STEPS)
+        result = agent.run(task=task, max_steps=react_max_steps)
         generated_code = extract_python_code(coerce_agent_output_text(result))
     except Exception as exc:
-        if template_png_count > 0 and is_context_length_error(exc):
-            generation_mode = "react_context_fallback_template_synthesis"
+        if template_png_count > 0:
+            generation_mode = "react_exception_fallback_template_synthesis"
+            if is_context_length_error(exc):
+                generation_mode = "react_context_fallback_template_synthesis"
+            print(f"Agent reasoning exception: {type(exc).__name__}: {exc}")
             generated_code = build_template_driven_code(
                 source_file=source_file,
                 output_file=output_file,
-                template_analysis=processed_template_analysis or original_template_analysis,
+                template_analysis=original_template_analysis or processed_template_analysis,
                 template_png_paths=template_png_paths,
+                form_items=form_items,
+            )
+            generated_code = apply_resize_directive_to_generated_code(
+                generated_code=generated_code,
+                should_resize=resize_requested,
+            )
+            generated_code = apply_form_directive_to_generated_code(
+                generated_code=generated_code,
+                form_items=form_items,
             )
             output_file, backup_file = write_generated_code(output_file, generated_code)
             print(f"Source file: {source_file}")
@@ -1035,14 +1806,28 @@ def main():
         raise
 
     generation_mode = "react_code_agent"
-    if template_png_count > 0 and not looks_like_gtk_code(generated_code):
+    if should_fallback_to_template_synthesis(
+        generated_code=generated_code,
+        template_png_count=template_png_count,
+        selected_template=selected_template,
+    ):
         generation_mode = "react_code_agent_fallback_template_synthesis"
         generated_code = build_template_driven_code(
             source_file=source_file,
             output_file=output_file,
-            template_analysis=processed_template_analysis or original_template_analysis,
+            template_analysis=original_template_analysis or processed_template_analysis,
             template_png_paths=template_png_paths,
+            form_items=form_items,
         )
+
+    generated_code = apply_resize_directive_to_generated_code(
+        generated_code=generated_code,
+        should_resize=resize_requested,
+    )
+    generated_code = apply_form_directive_to_generated_code(
+        generated_code=generated_code,
+        form_items=form_items,
+    )
 
     output_file, backup_file = write_generated_code(output_file, generated_code)
 
