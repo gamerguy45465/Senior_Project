@@ -28,7 +28,10 @@ OTHER_FILES += \
     python/*.py
 
 RESOURCES += \
+    icon.qrc \
     texteditor.qrc
+
+win32: RC_ICONS += appicon.ico
 
 target.path = $$[QT_INSTALL_EXAMPLES]/quickcontrols2/texteditor
 INSTALLS += target

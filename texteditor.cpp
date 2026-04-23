@@ -12,6 +12,7 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QQuickTextDocument>
+#include <QIcon>
 #include "pythonsyntaxhighlighting.h"
 
 #include "documenthandler.h"
@@ -27,6 +28,9 @@ int main(int argc, char *argv[])
 #else
     QGuiApplication app(argc, argv);
 #endif
+
+
+    app.setWindowIcon(QIcon(":/new/prefix1/appicon.ico"));
 
     if (QFontDatabase::addApplicationFont(":/fonts/fontello.ttf") == -1)
         qWarning() << "Failed to load fontello.ttf";

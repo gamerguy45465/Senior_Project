@@ -20,6 +20,7 @@ ApplicationWindow {
     height: 600
     visible: true
     //title: document.fileName + " - Text Editor Example"
+    title: "Graphic Edit"
 
 
     property bool runPending: false
